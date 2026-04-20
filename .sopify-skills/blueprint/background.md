@@ -12,7 +12,7 @@ CrossReview 把这个手工模式协议化：ReviewPack（结构化输入）→ 
 
 ## 上游决策来源
 
-产品命名、架构边界、MVP 范围等核心决策来自上游方案包 `sopify-skills/.sopify-skills/plan/20260418_cross_review_engine/`（Q1-Q9 已拍板）。
+产品命名、架构边界、MVP 范围等核心决策来自 Sopify 上游方案包 `20260418_cross_review_engine`（Q1-Q9 已拍板，存放于 sopify-skills 仓库）。本仓库不依赖上游方案包文件，仅以 `docs/v0-scope.md` 为 canonical scope。
 
 ## 当前定位
 
