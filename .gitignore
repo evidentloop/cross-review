@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment / secrets
+.env
+.env.local
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Sopify runtime state (not versioned)
+.sopify-skills/state/
+.sopify-skills/replay/
+.sopify-skills/plan/_registry.yaml
+
+# Prompt lab raw outputs (large, gitignore by default; commit selectively)
+prompt-lab/cases/*/raw-output-*.md
