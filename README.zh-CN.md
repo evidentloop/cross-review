@@ -6,24 +6,31 @@
 
 ## 什么是交叉审查？
 
-人类团队做 code review 时，作者不会审查自己的 PR —— **另一个人**用全新的视角来看。CrossReview 把同样的纪律带到 AI 生成代码上。
+在人工代码评审中，变更通常由**未直接参与实现的人**复核，以降低作者偏见。CrossReview 将这一原则应用到 AI 生成代码：把“生成”与“复核”拆到两个相互隔离的上下文中完成。
 
-你的 AI 编码助手（Claude、Copilot、Cursor 等）在一个 session 中写代码。CrossReview 把产出打包成 ReviewPack，发送到一个**独立的 LLM session**，这个 session 从未见过原始对话。这个"交叉审查者"在零共享上下文的条件下评估变更 —— 没有确认偏差，没有继承的盲区。
+AI 编码助手（Claude、Copilot、Cursor 等）先在其原始会话中完成实现。随后，CrossReview 将 diff、意图、focus 区域和可选上下文组装成 `ReviewPack`，交给一个**独立的 reviewer session** 做二次审查。该 reviewer 不继承原始对话、推理轨迹或工具历史，只基于最小必要输入判断这次变更是否存在问题。
 
 核心洞察：**你不需要换一个模型，只需要换一个上下文。** 同模型，干净 session，真实发现。
 
 ## 为什么有效
 
-作者 session 携带了它做出的每一个假设、变通和捷径 —— 确认偏差直接嵌入了上下文窗口。交叉审查者只看到关键信息：
+它依赖的不是模型多样性，而是**输入隔离**。
 
-| 交叉审查者能看到 | 交叉审查者看不到 |
+原始实现会话会累积大量局部假设、试错过程、放弃的方案和工具调用痕迹。如果复核阶段沿用这些上下文，reviewer 很容易继承作者视角，而不是重新独立判断这次改动是否正确。
+
+CrossReview 通过把 reviewer 输入限制在复核工件本身来避免这个问题：
+
+| Reviewer 能拿到 | Reviewer 拿不到 |
 |-----------------|----------------|
-| 变更内容 | 原始对话 |
-| 声明的意图 | 规划和推理链 |
+| Diff / changed files | 原始对话 |
+| 声明的意图 | 规划或推理轨迹 |
 | 重点区域 | 工具调用历史 |
-| 上下文文件 | 错误和重试记录 |
+| 可选 context files | 重试记录、失败尝试、中间草稿 |
 
-这种有针对性的信息不对称正是交叉审查有效的原因：足够的上下文来理解变更，但不至于继承作者的盲区。
+这种拆分带来两个直接效果：
+
+- 提高复核独立性：第二次审查必须基于工件本身给出判断，而不是复用原始会话状态。
+- 提高可审计性：reviewer 的结论可以回落到 `ReviewPack` 输入、结构化 findings 和确定性 normalizer 规则上验证。
 
 ## 早期评测结果
 
@@ -38,8 +45,15 @@
 ## 快速开始
 
 ```bash
-pip install -e .                    # 完整 CLI（pack + verify，不含 standalone reviewer 依赖）
+pip install -e .                    # 完整 CLI（包含 pack + verify 命令）
 pip install -e '.[anthropic]'       # 加 Anthropic standalone reviewer 后端
+
+# 通过 flags、crossreview.yaml 或环境变量配置 standalone verify
+# 示例：
+#   export CROSSREVIEW_PROVIDER=anthropic
+#   export CROSSREVIEW_MODEL=claude-sonnet-4-20250514
+#   export CROSSREVIEW_API_KEY_ENV=ANTHROPIC_API_KEY
+#   export ANTHROPIC_API_KEY=...
 
 crossreview pack --diff HEAD~1 --intent "fix auth token refresh" > pack.json
 crossreview verify --pack pack.json
@@ -49,22 +63,54 @@ crossreview verify --pack pack.json
 
 ```jsonc
 {
-  "verdict": "has_findings",
+  "schema_version": "0.1-alpha",
+  "artifact_fingerprint": "diff:abc123",
+  "pack_fingerprint": "pack:def456",
+  "review_status": "complete",
+  "intent_coverage": "covered",
   "findings": [
     {
       "id": "f-001",
-      "file": "src/auth.py",
       "severity": "high",
+      "summary": "Token refresh 在 refresh_token 过期时静默成功",
+      "detail": "第 42 行的 try/except 捕获了 TokenExpiredError 但返回旧 token，而不是抛出异常。",
       "category": "logic_error",
-      "description": "Token refresh 在 refresh_token 过期时静默成功",
-      "why": "第 42 行的 try/except 捕获了 TokenExpiredError 但返回旧 token 而非抛出异常",
-      "actionable": true
+      "locatability": "exact",
+      "confidence": "plausible",
+      "evidence_related_file": false,
+      "actionable": true,
+      "file": "src/auth.py",
+      "line": 42
     }
   ],
+  "advisory_verdict": {
+    "verdict": "concerns",
+    "rationale": "review found medium/high-severity issues"
+  },
   "quality_metrics": {
-    "budget_status": "complete",
     "pack_completeness": 0.85,
+    "noise_count": 0,
+    "raw_findings_count": 1,
+    "emitted_findings_count": 1,
+    "locatability_distribution": {
+      "exact_pct": 1.0,
+      "file_only_pct": 0.0,
+      "none_pct": 0.0
+    },
     "speculative_ratio": 0.0
+  },
+  "reviewer": {
+    "type": "fresh_llm",
+    "model": "claude-sonnet-4-20250514",
+    "session_isolated": true,
+    "failure_reason": null
+  },
+  "budget": {
+    "status": "complete",
+    "files_reviewed": 1,
+    "files_total": 1,
+    "chars_consumed": 842,
+    "chars_limit": 12000
   }
 }
 ```
@@ -72,45 +118,51 @@ crossreview verify --pack pack.json
 ## 架构
 
 ```
-+-------------------------+
-| crossreview pack        |  git diff + intent + focus + context
-| -> ReviewPack JSON      |
-+-------------------------+
-             |
-             v
-+-------------------------+
-| Budget Gate             |  focus 优先排序，soft/hard 截断
-| -> budget_status        |  complete | truncated | rejected
-+-------------------------+
-             |
-             v
-+-------------------------+
-| Reviewer (LLM)          |  上下文隔离的全新 session
-| -> raw_analysis         |  自由文本分析，不约束 schema
-+-------------------------+
-             |
-             v
-+-------------------------+
-| Normalizer              |  确定性 regex/heuristic
-| -> list[Finding]        |  结构化发现：severity + category
-+-------------------------+
-             |
-             v
-+-------------------------+
-| Adjudicator             |  确定性规则引擎
-| -> advisory verdict     |  pass_candidate | has_findings | concerns
-+-------------------------+
-             |
-             v
-+-------------------------+
-| ReviewResult JSON       |  verdict + findings + quality_metrics
-+-------------------------+
+         git diff + intent + focus + context
+                      │
+                      ▼
+              ┌────────────────┐
+              │      Pack      │  组装 ReviewPack
+              └───────┬────────┘
+                      │
+                      ▼
+              ┌────────────────┐
+              │  Budget Gate   │  按重点排序，截断过大输入
+              └───────┬────────┘
+                      │
+   ╔══════════════════╪═══════════════════════════╗
+   ║                  ▼  Isolation Boundary       ║
+   ║          ┌────────────────┐                  ║
+   ║          │ Reviewer (LLM) │  Fresh session,  ║
+   ║          │                │  zero shared ctx ║
+   ║          └───────┬────────┘                  ║
+   ╚══════════════════╪═══════════════════════════╝
+                      │
+                      ▼
+              ┌────────────────┐
+              │  Normalizer    │  从文本提取结构化发现
+              └───────┬────────┘
+                      │
+                      ▼
+              ┌────────────────┐
+              │  Adjudicator   │  应用规则 → 建议性判定
+              └───────┬────────┘
+                      │
+                      ▼
+              ┌────────────────┐
+              │ ReviewResult   │  发现 + 判定 + 质量指标
+              │ (JSON)         │
+              └────────────────┘
 ```
+
+> **Isolation Boundary（隔离边界）**：Reviewer 在全新 session 中运行，零共享上下文。
+
+只有 Reviewer 调用 LLM，其余全部基于规则 —— 没有 AI 参与。
 
 ## 安装
 
 ```bash
-pip install -e .                    # 完整 CLI（pack + verify，不含 standalone reviewer 依赖）
+pip install -e .                    # 完整 CLI（包含 pack + verify 命令）
 pip install -e '.[anthropic]'       # 加 Anthropic standalone reviewer 后端
 pip install -e '.[dev]'             # 开发依赖（pytest + ruff）
 ```
@@ -119,10 +171,10 @@ Reviewer 后端有两种模式：
 
 | 模式 | 说明 | 依赖 |
 |------|------|------|
-| **Host-integrated** *（计划中）* | 宿主（AI 编码助手）提供 fresh-session 后端 | 无额外 SDK |
-| **Standalone** *（已实现）* | CLI 直接调 LLM API | `crossreview[anthropic]` + API key |
+| **Host-integrated** *（计划中）* | 宿主提供独立 reviewer backend；CrossReview 只消费结果 | CrossReview 侧无额外 SDK |
+| **Standalone** *（已实现）* | CLI 直接调 LLM API | `crossreview[anthropic]` + reviewer config + API key |
 
-Host-integrated 是计划中的默认产品路径；standalone 是当前已实现的 portable 方案。
+Host-integrated 是计划中的默认产品路径。当前 `main` 分支实际只提供 standalone verify。
 
 ## 命令
 
@@ -148,6 +200,13 @@ crossreview verify --pack pack.json
 crossreview verify --pack pack.json --model claude-sonnet-4-20250514 --provider anthropic
 ```
 
+`crossreview verify` 还要求 reviewer 配置能成功解析，来源可以是：
+
+- `--model / --provider / --api-key-env`
+- 或 `crossreview.yaml`
+- 或 `~/.crossreview/config.yaml`
+- 或 `CROSSREVIEW_MODEL / CROSSREVIEW_PROVIDER / CROSSREVIEW_API_KEY_ENV`
+
 | 参数 | 说明 |
 |------|------|
 | `--pack FILE` | ReviewPack JSON 文件路径 |
@@ -159,25 +218,25 @@ crossreview verify --pack pack.json --model claude-sonnet-4-20250514 --provider 
 
 | 组件 | 状态 | 说明 |
 |------|------|------|
-| Schema (1A) | ✅ 完成 | ReviewPack / Finding / ReviewResult / Config |
-| Pack CLI (1B.1 + 1C.1) | ✅ 完成 | `crossreview pack` |
-| Budget Gate (1B.3) | ✅ 完成 | focus 优先 + soft/hard 截断 |
-| Reviewer (1B.4) | ✅ 完成 | ReviewerBackend 接口 + Anthropic standalone |
-| Normalizer (1B.5) | ✅ 完成 | 确定性 regex/heuristic |
-| Adjudicator (1B.6) | ✅ 完成 | 最小 advisory verdict 规则 |
-| Verify CLI (1C.2) | ✅ 完成 | `crossreview verify --pack` |
-| Evidence Collector (1B.2) | 🔜 待做 | ReviewPack.evidence 通路已有，空 evidence 可正常运行 |
-| Eval Harness (1D.1) | 🔜 待做 | 依赖已稳定的 ReviewResult 语义 |
-| Output Formatter (1B.7) | 🔜 待做 | `--format human` |
-| Full Verify CLI (1C.2+) | 🔜 待做 | `--diff` 一站式路径 |
+| Schema | ✅ 完成 | ReviewPack / Finding / ReviewResult / Config |
+| Pack CLI | ✅ 完成 | `crossreview pack` |
+| Budget Gate | ✅ 完成 | focus 优先 + soft/hard 截断 |
+| Reviewer | ✅ 完成 | ReviewerBackend 接口 + Anthropic standalone |
+| Normalizer | ✅ 完成 | 基于规则的结构化发现提取 |
+| Adjudicator | ✅ 完成 | 基于规则的建议性判定 |
+| Verify CLI | ✅ 完成 | `crossreview verify --pack` |
+| Evidence Collector | 🔜 待做 | ReviewPack.evidence 通路已有，空 evidence 可正常运行 |
+| Eval Harness | 🔜 规划中 | 基于 fixture 的 release gate 验证 |
+| 可读输出 | 🔜 待做 | `--format human` |
+| 一站式 Verify | 🔜 待做 | `crossreview verify --diff`（pack + review 一步完成） |
 
 ## v0 边界
 
-**当前支持**: 仅 `code_diff` artifact · advisory verdict · 单 reviewer（`fresh_llm_reviewer`） · 确定性 adjudicator 和 normalizer（不做 LLM fallback）
+**当前支持**: 仅 `code_diff` artifact · advisory verdict · 单 reviewer（`fresh_llm`） · 确定性 adjudicator 和 normalizer（不做 LLM fallback）
 
 **明确不做（v0）**: Python SDK · MCP Server · Agent Skill · CI/CD Action · cross-model reviewer · verdict = block
 
-**Release gate**: v0 需通过 [8 项 blocking 指标](docs/v0-scope.md)（§12），包括 manual_recall ≥ 0.80、precision ≥ 0.70、fixture_count ≥ 20、invalid_per_run ≤ 0.20 等。不满足 → 退回为 prompt pattern，不做独立产品化。
+**Release gate**: v0 需通过 [8 项 blocking 指标](docs/v0-scope.md)（§12），包括 manual_recall ≥ 0.80、precision ≥ 0.70、fixture_count ≥ 20、invalid_findings_per_run ≤ 2 等。不满足 → 退回为 prompt pattern，不做独立产品化。
 
 ## 许可
 
