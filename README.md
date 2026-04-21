@@ -1,69 +1,116 @@
 # CrossReview
 
-> Context-isolated verification for AI-generated code — value comes from isolation, not model diversity.
+English | [简体中文](README.zh-CN.md)
 
-CrossReview 把手工 fresh-session cross-review 流程协议化、自动化。同一模型新开 session（无生产过程上下文）就能发现问题。
+> Automated cross-review for AI coding assistants — a fresh, isolated LLM session verifies what your assistant produced.
+
+## What is Cross-Review?
+
+When a human team reviews code, the author doesn't review their own pull request — a **different person** looks at it with fresh eyes. CrossReview brings the same discipline to AI-generated code.
+
+Your AI coding assistant (Claude, Copilot, Cursor, etc.) writes code in one session. CrossReview sends the resulting diff to a **separate LLM session** that has never seen the original conversation. This "cross-reviewer" evaluates the change with no shared context — no confirmation bias, no inherited blind spots.
+
+The key insight: **you don't need a different model, just a different context.** Same model, clean session, real findings.
+
+## Why It Works
+
+The author session carries every assumption, workaround, and shortcut it made — confirmation bias baked into the context window. The cross-reviewer sees only what matters:
+
+| Cross-reviewer sees | Cross-reviewer doesn't see |
+|---------------------|---------------------------|
+| The diff | Original conversation |
+| Stated intent | Planning & reasoning chain |
+| Focus areas | Tool call history |
+| Context files | Errors & retries |
+
+This targeted information asymmetry is what makes cross-review effective: enough context to understand the change, not enough to inherit the author's blind spots.
+
+## Early Results
+
+Preliminary evaluation across 4 real-world fixtures (tool-assisted isolated reviewer, claude-opus-4.6):
+
+- **Precision 1.00** — zero false positives (improved from 0.45 in Round 1 after introducing Findings/Observations split)
+- **Recall 0.75** — one baseline finding missed (bash multiline continuation semantics)
+- **Invalid findings per run: 0.00**
+
+These results validate the direction but are too small to be conclusive. A full eval harness with 13+ fixtures and [8 release gate metrics](docs/v0-scope.md) is in progress.
 
 ## Quick Start
 
 ```bash
-# 1. Install
-pip install -e .                    # core (pack only)
-pip install -e '.[anthropic]'       # + standalone Anthropic reviewer backend
+pip install -e .                    # full CLI (pack + verify, without standalone reviewer dependency)
+pip install -e '.[anthropic]'       # + Anthropic standalone reviewer backend
 
-# 2. Pack a diff into ReviewPack JSON
 crossreview pack --diff HEAD~1 --intent "fix auth token refresh" > pack.json
-
-# 3. Verify the pack (requires reviewer backend)
 crossreview verify --pack pack.json
 ```
 
-`crossreview verify` outputs a `ReviewResult` JSON to stdout with structured findings, advisory verdict, and quality metrics.
+`crossreview verify` outputs `ReviewResult` JSON to stdout:
+
+```jsonc
+{
+  "verdict": "has_findings",
+  "findings": [
+    {
+      "id": "f-001",
+      "file": "src/auth.py",
+      "severity": "high",
+      "category": "logic_error",
+      "description": "Token refresh silently succeeds when refresh_token is expired",
+      "why": "The try/except on line 42 catches TokenExpiredError but returns the old token instead of raising",
+      "actionable": true
+    }
+  ],
+  "quality_metrics": {
+    "budget_status": "complete",
+    "pack_completeness": 0.85,
+    "speculative_ratio": 0.0
+  }
+}
+```
 
 ## Architecture
 
-```
-                         ┌─────────────┐
-  git diff ──────────▶   │  Pack CLI    │  ──▶  ReviewPack JSON
-                         └─────────────┘
+```mermaid
+flowchart LR
+    subgraph pack [Pack]
+        A[git diff] --> B[Pack CLI]
+    end
+    B --> C[ReviewPack JSON]
 
-  ReviewPack JSON ──▶  ┌───────────────────────────────────────────┐
-                        │            Verify Pipeline                │
-                        │                                           │
-                        │  Budget Gate ─▶ Reviewer ─▶ Normalizer   │
-                        │       │              │            │       │
-                        │       ▼              ▼            ▼       │
-                        │  complete/      raw_analysis   Findings   │
-                        │  truncated/                               │
-                        │  rejected     ┌──────────────┐            │
-                        │               │ Adjudicator  │            │
-                        │               └──────┬───────┘            │
-                        │                      ▼                    │
-                        │              ReviewResult JSON            │
-                        └───────────────────────────────────────────┘
+    subgraph verify [Verify Pipeline]
+        D[Budget Gate] -->|trimmed diff| E[Reviewer]
+        D -.->|budget_status| H
+        E -->|raw_analysis| F[Normalizer]
+        F -->|Findings| G[Adjudicator]
+    end
+    C --> D
+    G --> H[ReviewResult JSON]
 ```
 
-- **Budget Gate** — focus 文件优先 + diff 原顺序，按 max_files / max_chars_total 截断
-- **Reviewer** — context-isolated LLM session，输出自由分析文本（raw_analysis）
-- **Normalizer** — deterministic regex/heuristic，从 raw_analysis 提取结构化 Finding
-- **Adjudicator** — deterministic 规则引擎，产出 advisory verdict（不做 block）
+| Component | Role |
+|-----------|------|
+| **Budget Gate** | Focus files first, diff order preserved, soft/hard char cap truncation |
+| **Reviewer** | Context-isolated LLM session, outputs free-form analysis (`raw_analysis`) |
+| **Normalizer** | Deterministic regex/heuristic, extracts structured `Finding` objects |
+| **Adjudicator** | Deterministic rule engine, produces advisory verdict |
 
 ## Installation
 
 ```bash
-pip install -e .                    # 最小安装（pack CLI + schema）
-pip install -e '.[anthropic]'       # 加 Anthropic standalone backend
-pip install -e '.[dev]'             # 开发依赖（pytest + ruff）
+pip install -e .                    # full CLI (pack + verify, without standalone reviewer dependency)
+pip install -e '.[anthropic]'       # + Anthropic standalone reviewer backend
+pip install -e '.[dev]'             # dev dependencies (pytest + ruff)
 ```
 
-Reviewer backend 有两种模式：
+Two reviewer backend modes:
 
-| 模式 | 说明 | 依赖 |
-|------|------|------|
-| **Host-integrated** | 宿主（AI 编码助手）提供 fresh-session backend | 无额外 SDK |
-| **Standalone** | CLI 直接调 LLM API | `crossreview[anthropic]` + API key |
+| Mode | Description | Dependency |
+|------|-------------|------------|
+| **Host-integrated** *(planned)* | AI coding assistant provides fresh-session backend | No extra SDK |
+| **Standalone** *(implemented)* | CLI calls LLM API directly | `crossreview[anthropic]` + API key |
 
-Host-integrated 是默认产品路径；standalone 是 portable fallback。
+Host-integrated is the planned default product path; standalone is the current portable implementation.
 
 ## Commands
 
@@ -72,16 +119,15 @@ Host-integrated 是默认产品路径；standalone 是 portable fallback。
 ```bash
 crossreview pack --diff HEAD~1 > pack.json
 crossreview pack --diff main..feat --intent "add caching" --focus cache --context ./plan.md > pack.json
-crossreview pack --diff abc123..def456 --task ./task.md > pack.json
 ```
 
-| 参数 | 说明 |
-|------|------|
-| `--diff REF` | Git ref（`HEAD~1`）或范围（`main..feat`） |
-| `--intent TEXT` | 任务意图（背景声明，非真相） |
-| `--task FILE` | 完整任务描述文件 |
-| `--focus TERM` | 重点审查区域（可重复） |
-| `--context FILE` | 额外 context 文件（可重复） |
+| Flag | Description |
+|------|-------------|
+| `--diff REF` | Git ref (`HEAD~1`) or range (`main..feat`) |
+| `--intent TEXT` | Task intent (background claim, not ground truth) |
+| `--task FILE` | Full task description file |
+| `--focus TERM` | Focus review area (repeatable) |
+| `--context FILE` | Extra context file (repeatable) |
 
 ### `crossreview verify`
 
@@ -90,59 +136,36 @@ crossreview verify --pack pack.json
 crossreview verify --pack pack.json --model claude-sonnet-4-20250514 --provider anthropic
 ```
 
-| 参数 | 说明 |
-|------|------|
-| `--pack FILE` | ReviewPack JSON 文件路径 |
-| `--model TEXT` | 覆盖 reviewer 模型 |
-| `--provider TEXT` | 覆盖 provider（当前仅 `anthropic`） |
-| `--api-key-env VAR` | 覆盖 API key 环境变量名 |
+| Flag | Description |
+|------|-------------|
+| `--pack FILE` | Path to ReviewPack JSON |
+| `--model TEXT` | Override reviewer model |
+| `--provider TEXT` | Override provider (currently `anthropic` only) |
+| `--api-key-env VAR` | Override API key env variable name |
 
-## 当前状态
+## Status
 
-| 组件 | 状态 | 说明 |
-|------|------|------|
-| Schema (1A) | ✅ 完成 | ReviewPack / Finding / ReviewResult / Config |
-| Pack CLI (1B.1 + 1C.1) | ✅ 完成 | `crossreview pack` |
-| Budget Gate (1B.3) | ✅ 完成 | focus 优先 + soft/hard 截断 |
-| Reviewer (1B.4) | ✅ 完成 | ReviewerBackend 接口 + Anthropic standalone |
-| Normalizer (1B.5) | ✅ 完成 | deterministic regex/heuristic |
-| Adjudicator (1B.6) | ✅ 完成 | 最小 advisory verdict 规则 |
-| Verify CLI (1C.2) | ✅ 完成 | `crossreview verify --pack` |
-| Evidence Collector (1B.2) | 🔜 待做 | ReviewPack.evidence 通路已有，空 evidence 可正常运行 |
-| Eval Harness (1D.1) | 🔜 待做 | 依赖已稳定的 ReviewResult 语义 |
-| Output Formatter (1B.7) | 🔜 待做 | `--format human` |
-| Full Verify CLI (1C.2+) | 🔜 待做 | `--diff` 一站式路径 |
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Schema (1A) | ✅ Done | ReviewPack / Finding / ReviewResult / Config |
+| Pack CLI (1B.1 + 1C.1) | ✅ Done | `crossreview pack` |
+| Budget Gate (1B.3) | ✅ Done | Focus priority + soft/hard truncation |
+| Reviewer (1B.4) | ✅ Done | ReviewerBackend protocol + Anthropic standalone |
+| Normalizer (1B.5) | ✅ Done | Deterministic regex/heuristic |
+| Adjudicator (1B.6) | ✅ Done | Minimal advisory verdict rules |
+| Verify CLI (1C.2) | ✅ Done | `crossreview verify --pack` |
+| Evidence Collector (1B.2) | 🔜 Next | ReviewPack.evidence path exists, empty evidence works |
+| Eval Harness (1D.1) | 🔜 Next | Depends on stable ReviewResult semantics |
+| Output Formatter (1B.7) | 🔜 Next | `--format human` |
+| Full Verify CLI (1C.2+) | 🔜 Next | `--diff` one-stop path |
 
-## v0 边界
+## v0 Scope
 
-### 当前支持
+**Supported**: `code_diff` artifact only · advisory verdict · single `fresh_llm_reviewer` · deterministic adjudicator and normalizer (no LLM fallback)
 
-- `code_diff` artifact only
-- Advisory verdict（建议，不做 block）
-- Single reviewer（`fresh_llm_reviewer`）
-- Deterministic adjudicator（规则引擎，不涉及 LLM）
-- Deterministic normalizer（regex/heuristic，不做 LLM fallback）
+**Out of scope (v0)**: Python SDK · MCP Server · Agent Skill · CI/CD Action · cross-model reviewer · verdict = block
 
-### 明确不做（v0）
-
-- ❌ Python SDK（v1）
-- ❌ MCP Server（v1+）
-- ❌ Agent Skill
-- ❌ CI/CD GitHub Action
-- ❌ cross_model_reviewer / skill_guided_reviewer
-- ❌ verdict = block
-
-## Release Gate
-
-v0 发布需通过 [8 项 blocking release gates](docs/v0-scope.md)（见 §12）：
-
-- manual_recall ≥ 0.80
-- precision ≥ 0.70
-- fixture_count ≥ 20
-
-不满足 → 退回为 prompt pattern，不做独立产品化。
-
-详细 scope → [docs/v0-scope.md](docs/v0-scope.md)
+**Release gate**: v0 must pass [8 blocking metrics](docs/v0-scope.md) (§12), including manual_recall ≥ 0.80, precision ≥ 0.70, fixture_count ≥ 20, invalid_per_run ≤ 0.20, and 4 others. Fail → revert to prompt pattern, no standalone product.
 
 ## License
 
