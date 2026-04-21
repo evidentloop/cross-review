@@ -36,4 +36,9 @@ Thumbs.db
 
 # Prompt lab raw outputs (large, gitignore by default; commit selectively)
 prompt-lab/cases/*/raw-output.md
+prompt-lab/cases/*/raw-output-r*.md
 prompt-lab/cases/*/rendered-prompt.md
+prompt-lab/cases/*/adjudication-r*.yaml
+
+# Dependency lock (uv)
+uv.lock
