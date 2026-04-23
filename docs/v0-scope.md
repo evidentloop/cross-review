@@ -35,6 +35,24 @@ CrossReview 的长期对象不是只有 code diff，而是**任意可审查 arti
 - analysis / plan / design / review-result 的交叉验证，属于真实 workflow 使用场景，或未来 artifact type 扩展
 - 这类非 diff artifact 的结果可以单独记录为 workflow 模式收益，但**不计入**当前 Prompt Lab / v0 release gate 的 single-pass 指标
 
+### 非 code_diff artifact 扩展路径（已识别，v1+）
+
+**已观察到的真实用户场景**：用户在两个 AI（如 Codex 与 Claude）之间手工做架构 plan 的交叉审阅——让 A 写 plan，拿给 B review，把 review 意见回喂 A argue，再拿 argue 回 B。这本质上是 CrossReview 协议在 design artifact 上的手工实例。
+
+**协议层结论**：ReviewPack → Reviewer → ReviewResult 管道对 plan/design artifact 同样成立。`artifact_type` 可从 `code_diff` 扩展到 `design_doc` / `plan`，核心管道无需重写。
+
+**真正的差异不在协议，在消费层**：
+
+| 消费层 | code_diff 行为 | plan/design 需要的调整 | 性质 |
+|--------|---------------|----------------------|------|
+| Prompt 模板 | 语义等价检查、文件路径定位 | 耦合度、扩展性、遗漏考虑 | 内容/配置 |
+| Finding 约束 | high 要求 exact locatability (file+line) | 无 file/line，按文档段落定位 | 参数松弛 |
+| Eval 口径 | valid = diff 可见且可归责的真实 bug | valid = 架构层面的真实风险 | 判定标准 |
+
+**v0 锁 code_diff 的根本约束是 eval baseline**：当前有 13 个 code_diff case 及 adjudication 数据，对 plan/design 一个 baseline 都没有。管道跑通不等于能量化质量。
+
+**扩展增量**：一旦 v0 管道稳定，支持 plan/design 的增量代价是——按 `artifact_type` 选模板 + 放松 locatability 约束 + 建立 plan-specific eval baseline。不需要架构变更。
+
 ### 产品主张
 
 ```
