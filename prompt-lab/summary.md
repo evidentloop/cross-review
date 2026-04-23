@@ -7,20 +7,20 @@
 > **Adjudication standard**: strict — valid 仅限当前 diff 可见且可归责的真实问题；observation 桶不计入 precision
 > **隔离级别**: tool-assisted (见 [隔离级别说明](#隔离级别说明))
 
-## Prompt Provenance
+## Prompt 来源
 
-Prompt Lab has separate historical and product prompt seams:
+Prompt Lab 区分历史实验入口与产品 prompt 入口：
 
-| Run family | Runner mode | Prompt source | Version | Status |
+| 轮次 | Runner 模式 | Prompt 来源 | 版本 | 状态 |
 |------------|-------------|---------------|---------|--------|
-| Round 1 | manual/tool-assisted | `prompt-lab/prompt-template.md` | v0 | historical |
-| Round 2 | manual/tool-assisted | `prompt-lab/prompt-template.md` | v0.2 | latest adjudicated summary below |
-| Round 3 | manual/tool-assisted | not reproducibly checked in | v0.3 | historical data only; do not use as a product baseline |
-| Round 4 | `run.py --api-only` | `crossreview/core/prompt.py` | product/v0.1 | planned product-prompt baseline |
+| Round 1 | manual/tool-assisted | `prompt-lab/prompt-template.md` | v0 | 历史数据 |
+| Round 2 | manual/tool-assisted | `prompt-lab/prompt-template.md` | v0.2 | 下方最新已 adjudicate 摘要 |
+| Round 3 | manual/tool-assisted | 未可复现入库 | v0.3 | 仅作历史数据，不作为 product baseline |
+| Round 4 | `run.py --api-only` | `crossreview/core/prompt.py` | product/v0.1 | 计划中的 product-prompt baseline |
 
-Round 3 data may still inform prompt design, but its exact `template: v0.3` file is absent from the repository. API-only runs intentionally use the canonical product prompt, not `prompt-lab/prompt-template.md`; their `ReviewResult.reviewer` metadata must record `prompt_source: "product"` and `prompt_version: "v0.1"`.
+Round 3 数据仍可用于提示词设计参考，但它标注的 `template: v0.3` 文件不在仓库中，无法严格复现。API-only run 有意使用 canonical product prompt，而不是 `prompt-lab/prompt-template.md`；其 `ReviewResult.reviewer` metadata 必须记录 `prompt_source: "product"` 与 `prompt_version: "v0.1"`。
 
-Product prompt `v0.1` includes the Round 2 core improvements (Findings/Observations split, diff-only constraint, semantic equivalence) and adds a shell/command continuation instruction targeted at the Round 2 recall gap. Because this changes the prompt, new `run-r4.json` outputs require new `adjudication-r4.yaml`; `adjudication-r3.yaml` must not be reused.
+Product prompt `v0.1` 包含 Round 2 的核心改进（Findings/Observations split、diff-only constraint、semantic equivalence），并针对 Round 2 recall gap 增加 shell/command continuation 指令。由于 prompt 已变化，新的 `run-r4.json` 输出必须重新生成 `adjudication-r4.yaml`；不能复用 `adjudication-r3.yaml`。
 
 ## Adjudication Schema
 
