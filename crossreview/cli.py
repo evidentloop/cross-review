@@ -1,12 +1,11 @@
 """CrossReview CLI — ``crossreview pack`` / ``crossreview verify``.
 
-Implements 1C.1 (pack CLI). Verify is a stub until 1B.4+ land.
-
 Usage::
 
     crossreview pack --diff HEAD~1 > pack.json
     crossreview pack --diff HEAD~1 --intent "fix auth" --focus auth > pack.json
     crossreview pack --diff HEAD~1 --task ./task.md --context ./plan.md > pack.json
+    crossreview verify --pack pack.json
 """
 
 from __future__ import annotations
@@ -15,10 +14,7 @@ import argparse
 import json
 import sys
 
-from .adjudicator import determine_advisory_verdict, determine_intent_coverage
-from .budget import apply_budget_gate
 from .config import ConfigError, resolve_reviewer_config
-from .normalizer import normalize_review_output
 from .pack import (
     GitDiffError,
     assemble_pack,
@@ -29,20 +25,8 @@ from .pack import (
     read_context_files,
     read_task_file,
 )
-from .reviewer import (
-    ReviewerError,
-    resolve_reviewer_backend,
-)
+from .verify import run_verify_pack
 from .schema import (
-    AdvisoryVerdict,
-    BudgetStatus,
-    ReviewResult,
-    ReviewStatus,
-    ReviewerFailureReason,
-    ReviewerMeta,
-    ResultBudget,
-    SCHEMA_VERSION,
-    Verdict,
     review_pack_from_dict,
     review_result_to_json,
     validate_review_pack,
@@ -212,60 +196,6 @@ def _load_pack(path: str):
         return None
 
 
-def _build_result(
-    *,
-    pack,
-    reviewer_model: str,
-    budget_status: BudgetStatus,
-    files_reviewed: int,
-    files_total: int,
-    chars_consumed: int,
-    chars_limit: int | None,
-    review_status: ReviewStatus,
-    raw_findings: list | None = None,
-    findings=None,
-    raw_analysis: str | None = None,
-    latency_sec: float | None = None,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
-    failure_reason: ReviewerFailureReason | None = None,
-    advisory_verdict: AdvisoryVerdict | None = None,
-    quality_metrics=None,
-    intent_coverage=None,
-) -> ReviewResult:
-    result = ReviewResult(
-        schema_version=SCHEMA_VERSION,
-        artifact_fingerprint=pack.artifact_fingerprint,
-        pack_fingerprint=pack.pack_fingerprint,
-        review_status=review_status,
-        intent_coverage=intent_coverage or determine_intent_coverage(pack, findings or []),
-        raw_findings=raw_findings or [],
-        findings=findings or [],
-        evidence=list(pack.evidence or []),
-        advisory_verdict=advisory_verdict or AdvisoryVerdict(
-            verdict=Verdict.INCONCLUSIVE,
-            rationale="review did not produce a final advisory verdict",
-        ),
-        quality_metrics=quality_metrics or ReviewResult().quality_metrics,
-        reviewer=ReviewerMeta(
-            model=reviewer_model,
-            raw_analysis=raw_analysis,
-            latency_sec=latency_sec,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            failure_reason=failure_reason,
-        ),
-        budget=ResultBudget(
-            status=budget_status,
-            files_reviewed=files_reviewed,
-            files_total=files_total,
-            chars_consumed=chars_consumed,
-            chars_limit=chars_limit,
-        ),
-    )
-    return result
-
-
 def _cmd_verify(args: argparse.Namespace) -> int:
     """Execute ``crossreview verify --pack pack.json``."""
     pack = _load_pack(args.pack)
@@ -287,98 +217,12 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    budget_result = apply_budget_gate(pack)
-    pack_completeness = compute_pack_completeness(pack)
-
-    if budget_result.status == BudgetStatus.REJECTED:
-        result = _build_result(
-            pack=pack,
-            reviewer_model=reviewer_config.model,
-            budget_status=budget_result.status,
-            files_reviewed=budget_result.files_reviewed,
-            files_total=budget_result.files_total,
-            chars_consumed=budget_result.chars_consumed,
-            chars_limit=budget_result.chars_limit,
-            review_status=ReviewStatus.REJECTED,
-            failure_reason=budget_result.failure_reason,
-            advisory_verdict=AdvisoryVerdict(
-                verdict=Verdict.INCONCLUSIVE,
-                rationale="review input was rejected by the budget gate",
-            ),
-        )
-        if validate_review_result(result):
-            print("error: internal error while building rejected ReviewResult", file=sys.stderr)
-            return 1
-        print(review_result_to_json(result))
-        print("crossreview verify: review_status=rejected", file=sys.stderr)
-        return 0
-
-    if budget_result.effective_pack is None:
-        print("error: budget gate passed but effective_pack is None", file=sys.stderr)
+    try:
+        result = run_verify_pack(pack, reviewer_config)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    try:
-        backend = resolve_reviewer_backend(reviewer_config)
-        review = backend.review(budget_result.effective_pack, reviewer_config)
-    except ReviewerError as exc:
-        result = _build_result(
-            pack=pack,
-            reviewer_model=reviewer_config.model,
-            budget_status=budget_result.status,
-            files_reviewed=budget_result.files_reviewed,
-            files_total=budget_result.files_total,
-            chars_consumed=budget_result.chars_consumed,
-            chars_limit=budget_result.chars_limit,
-            review_status=ReviewStatus.FAILED,
-            failure_reason=exc.failure_reason,
-            advisory_verdict=AdvisoryVerdict(
-                verdict=Verdict.INCONCLUSIVE,
-                rationale=str(exc),
-            ),
-        )
-        if validate_review_result(result):
-            print("error: internal error while building failed ReviewResult", file=sys.stderr)
-            return 1
-        print(review_result_to_json(result))
-        print("crossreview verify: review_status=failed", file=sys.stderr)
-        return 0
-
-    normalization = normalize_review_output(
-        review.raw_analysis,
-        budget_result.effective_pack,
-        pack_completeness=pack_completeness,
-    )
-
-    advisory_verdict = determine_advisory_verdict(
-        findings=normalization.findings,
-        pack=pack,
-        budget_status=budget_result.status,
-        pack_completeness=pack_completeness,
-        speculative_ratio=normalization.quality_metrics.speculative_ratio,
-    )
-    review_status = (
-        ReviewStatus.TRUNCATED
-        if budget_result.status == BudgetStatus.TRUNCATED
-        else ReviewStatus.COMPLETE
-    )
-    result = _build_result(
-        pack=pack,
-        reviewer_model=review.model,
-        budget_status=budget_result.status,
-        files_reviewed=budget_result.files_reviewed,
-        files_total=budget_result.files_total,
-        chars_consumed=budget_result.chars_consumed,
-        chars_limit=budget_result.chars_limit,
-        review_status=review_status,
-        findings=normalization.findings,
-        raw_findings=normalization.raw_findings,
-        raw_analysis=review.raw_analysis,
-        latency_sec=review.latency_sec,
-        input_tokens=review.input_tokens,
-        output_tokens=review.output_tokens,
-        advisory_verdict=advisory_verdict,
-        quality_metrics=normalization.quality_metrics,
-    )
     violations = validate_review_result(result)
     if violations:
         print(f"error: internal invalid ReviewResult: {', '.join(violations)}", file=sys.stderr)

@@ -7,7 +7,12 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
-from .core.prompt import get_default_reviewer_template, render_reviewer_prompt
+from .core.prompt import (
+    PRODUCT_REVIEWER_PROMPT_SOURCE,
+    PRODUCT_REVIEWER_PROMPT_VERSION,
+    get_default_reviewer_template,
+    render_reviewer_prompt,
+)
 from .schema import ReviewPack, ReviewerConfig, ReviewerFailureReason
 
 
@@ -46,6 +51,8 @@ class ReviewResponse:
     latency_sec: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    prompt_source: str | None = None
+    prompt_version: str | None = None
 
 
 class ReviewerBackend(Protocol):
@@ -111,6 +118,8 @@ class AnthropicReviewerBackend:
         return ReviewResponse(
             raw_analysis=raw_analysis,
             model=config.model,
+            prompt_source=PRODUCT_REVIEWER_PROMPT_SOURCE,
+            prompt_version=PRODUCT_REVIEWER_PROMPT_VERSION,
             latency_sec=latency_sec,
             input_tokens=getattr(usage, "input_tokens", None),
             output_tokens=getattr(usage, "output_tokens", None),

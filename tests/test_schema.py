@@ -10,6 +10,8 @@ Validates:
   - Enum coverage
 """
 
+import json
+
 import pytest
 
 from crossreview.schema import (
@@ -379,6 +381,8 @@ class TestReviewResult:
         assert result.reviewer.session_isolated is True
         assert result.reviewer.failure_reason is None
         assert result.reviewer.raw_analysis is None
+        assert result.reviewer.prompt_source is None
+        assert result.reviewer.prompt_version is None
         assert result.reviewer.latency_sec is None
 
     def test_quality_metrics_defaults(self):
@@ -411,6 +415,8 @@ class TestReviewResult:
             reviewer=ReviewerMeta(
                 model="claude-sonnet-4-20250514",
                 raw_analysis="The diff shows...",
+                prompt_source="product",
+                prompt_version="v0.1",
                 latency_sec=3.2,
                 input_tokens=1500,
                 output_tokens=800,
@@ -425,6 +431,8 @@ class TestReviewResult:
         )
         assert len(result.findings) == 1
         assert result.reviewer.model == "claude-sonnet-4-20250514"
+        assert result.reviewer.prompt_source == "product"
+        assert result.reviewer.prompt_version == "v0.1"
         assert result.budget.files_reviewed == 3
 
     def test_failed_result(self):
@@ -503,6 +511,8 @@ class TestReviewResultValidation:
                 "type": "fresh_llm",
                 "model": "claude-sonnet-4-20250514",
                 "session_isolated": True,
+                "prompt_source": "product",
+                "prompt_version": "v0.1",
             },
             "budget": {
                 "status": "complete",
@@ -513,6 +523,24 @@ class TestReviewResultValidation:
             },
         }
         assert validate_eval_review_result_contract(payload) == []
+
+    def test_review_result_round_trip_preserves_prompt_provenance(self):
+        from crossreview.schema import review_result_from_dict, review_result_to_json
+
+        result = ReviewResult(
+            artifact_fingerprint="artifact",
+            pack_fingerprint="pack",
+            reviewer=ReviewerMeta(
+                model="claude-sonnet-4-20250514",
+                prompt_source="product",
+                prompt_version="v0.1",
+            ),
+        )
+
+        parsed = review_result_from_dict(json.loads(review_result_to_json(result)))
+
+        assert parsed.reviewer.prompt_source == "product"
+        assert parsed.reviewer.prompt_version == "v0.1"
 
     def test_eval_contract_rejects_raw_findings_count_mismatch(self):
         payload = {

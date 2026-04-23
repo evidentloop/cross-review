@@ -160,7 +160,7 @@ class TestVerifyCLI:
         pack_path = self._write_pack(tmp_path, intent="fix greeting")
         with (
             patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
-            patch("crossreview.cli.resolve_reviewer_backend") as resolve_backend,
+            patch("crossreview.verify.resolve_reviewer_backend") as resolve_backend,
         ):
             resolve_cfg.return_value = type(
                 "Cfg",
@@ -206,8 +206,8 @@ class TestVerifyCLI:
         pack_path = self._write_pack(tmp_path, intent="fix greeting")
         with (
             patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
-            patch("crossreview.cli.resolve_reviewer_backend") as resolve_backend,
-            patch("crossreview.cli.normalize_review_output") as normalize_output,
+            patch("crossreview.verify.resolve_reviewer_backend") as resolve_backend,
+            patch("crossreview.verify.normalize_review_output") as normalize_output,
         ):
             resolve_cfg.return_value = type(
                 "Cfg",
@@ -318,7 +318,7 @@ class TestVerifyCLI:
         pack_path = self._write_pack(tmp_path)
         with (
             patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
-            patch("crossreview.cli.apply_budget_gate") as gate,
+            patch("crossreview.verify.apply_budget_gate") as gate,
         ):
             resolve_cfg.return_value = type(
                 "Cfg",
@@ -353,7 +353,7 @@ class TestVerifyCLI:
         pack_path = self._write_pack(tmp_path)
         with (
             patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
-            patch("crossreview.cli.resolve_reviewer_backend") as resolve_backend,
+            patch("crossreview.verify.resolve_reviewer_backend") as resolve_backend,
         ):
             resolve_cfg.return_value = type(
                 "Cfg",

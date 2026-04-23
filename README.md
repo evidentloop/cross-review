@@ -103,7 +103,9 @@ crossreview verify --pack pack.json
     "type": "fresh_llm",
     "model": "claude-sonnet-4-20250514",
     "session_isolated": true,
-    "failure_reason": null
+    "failure_reason": null,
+    "prompt_source": "product",
+    "prompt_version": "v0.1"
   },
   "budget": {
     "status": "complete",

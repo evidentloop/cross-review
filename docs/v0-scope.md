@@ -576,6 +576,8 @@ ReviewResult:
     session_isolated: bool
     failure_reason: ReviewerFailureReason | null
     raw_analysis: string | null     # reviewer 原始自由分析文本（审计证据）
+    prompt_source: string | null     # prompt 来源；内置产品 prompt 记录为 "product"
+    prompt_version: string | null    # prompt 版本；用于区分不可复现实验口径与产品口径
     latency_sec: float | null       # 模型调用耗时（秒）
     input_tokens: int | null        # LLM 输入 token 数
     output_tokens: int | null       # LLM 输出 token 数
@@ -1121,6 +1123,8 @@ diagnostic_metrics:
   pack_completeness              # 运行时启发式结构完整度（不和 manual baseline 对比）
   locatability_distribution      # exact / file_only / none 占比
   speculative_ratio              # speculative finding 占比
+  prompt_source                  # reviewer prompt 来源（例如 product）
+  prompt_version                 # reviewer prompt 版本（例如 v0.1）
   evidence_related_file_rate     # evidence_related_file == true 的 finding 占比
   triage_time                    # 端到端时间（含人工筛选）
   model_latency_sec              # 模型调用耗时（秒），不含 evidence 收集和 pack 构建

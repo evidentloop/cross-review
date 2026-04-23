@@ -7,6 +7,21 @@
 > **Adjudication standard**: strict — valid 仅限当前 diff 可见且可归责的真实问题；observation 桶不计入 precision
 > **隔离级别**: tool-assisted (见 [隔离级别说明](#隔离级别说明))
 
+## Prompt 来源
+
+Prompt Lab 区分历史实验入口与产品 prompt 入口：
+
+| 轮次 | Runner 模式 | Prompt 来源 | 版本 | 状态 |
+|------------|-------------|---------------|---------|--------|
+| Round 1 | manual/tool-assisted | `prompt-lab/prompt-template.md` | v0 | 历史数据 |
+| Round 2 | manual/tool-assisted | `prompt-lab/prompt-template.md` | v0.2 | 下方最新已 adjudicate 摘要 |
+| Round 3 | manual/tool-assisted | 未可复现入库 | v0.3 | 仅作历史数据，不作为 product baseline |
+| Round 4 | `run.py --api-only` | `crossreview/core/prompt.py` | product/v0.1 | 计划中的 product-prompt baseline |
+
+Round 3 数据仍可用于提示词设计参考，但它标注的 `template: v0.3` 文件不在仓库中，无法严格复现。API-only run 有意使用 canonical product prompt，而不是 `prompt-lab/prompt-template.md`；其 `ReviewResult.reviewer` metadata 必须记录 `prompt_source: "product"` 与 `prompt_version: "v0.1"`。
+
+Product prompt `v0.1` 包含 Round 2 的核心改进（Findings/Observations split、diff-only constraint、semantic equivalence），并针对 Round 2 recall gap 增加 shell/command continuation 指令。由于 prompt 已变化，新的 `run-r4.json` 输出必须重新生成 `adjudication-r4.yaml`；不能复用 `adjudication-r3.yaml`。
+
 ## Adjudication Schema
 
 > **口径定义**: valid = 当前 diff 可见且可归责的真实问题（含 introduced 和 preexisting_visible）
@@ -125,8 +140,8 @@ actionability:      1.00            1.00            ±0          >= 0.90 ✓ (wa
 
 ## 待办
 
-- [ ] 001 mf-002 recall gap — 考虑在 prompt-template 增加 "multiline statement continuation" 专项指引
-- [ ] Context isolation 方法改进 — 实现 render-only 纯隔离级别（API-only reviewer，无文件系统访问）
+- [ ] Round 4 — 用 `run.py --api-only --label r4` 对 13 个 case 跑 product/v0.1，生成结构化 `run-r4.json`
+- [ ] Round 4 adjudication — 基于 `run-r4.json` 重做 `adjudication-r4.yaml`，不复用 R3 判定
+- [ ] Context isolation 方法改进 — API-only reviewer 已无文件系统工具访问；继续记录 `prompt_source/prompt_version` 以防混算
 - [ ] 边界 finding 口径校准 — 002-f-002 / 003-f-002 在扩大 fixture 后重新评估
 - [ ] 扩大 fixture 数量至 20+ 以满足 release gate
-- [ ] Round 3 (如果对 prompt 做进一步修改)

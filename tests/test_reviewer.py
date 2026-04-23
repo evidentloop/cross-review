@@ -15,6 +15,11 @@ from crossreview.reviewer import (
     UnsupportedReviewerProviderError,
     resolve_reviewer_backend,
 )
+from crossreview.core.prompt import (
+    PRODUCT_REVIEWER_PROMPT_SOURCE,
+    PRODUCT_REVIEWER_PROMPT_VERSION,
+    get_default_reviewer_template,
+)
 from crossreview.schema import FileMeta, ReviewPack, ReviewerConfig
 
 
@@ -48,6 +53,15 @@ class TestReviewerBackendResolution:
                     api_key_env="OPENAI_API_KEY",
                 )
             )
+
+
+class TestProductReviewerPrompt:
+    def test_template_records_product_version_and_continuation_instruction(self):
+        template = get_default_reviewer_template()
+
+        assert "product/v0.1" in template
+        assert "statement-boundary and continuation semantics" in template
+        assert "`&&` or `||` at line end can continue across a newline" in template
 
 
 class TestAnthropicReviewerBackend:
@@ -113,6 +127,8 @@ class TestAnthropicReviewerBackend:
         )
 
         assert response.model == "claude-sonnet-4-20250514"
+        assert response.prompt_source == PRODUCT_REVIEWER_PROMPT_SOURCE
+        assert response.prompt_version == PRODUCT_REVIEWER_PROMPT_VERSION
         assert "No findings" in response.raw_analysis
         assert response.input_tokens == 123
         assert response.output_tokens == 45

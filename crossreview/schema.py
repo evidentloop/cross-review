@@ -179,6 +179,8 @@ class ReviewerMeta:
     latency_sec: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    prompt_source: str | None = None   # e.g. "product" for the built-in prompt seam
+    prompt_version: str | None = None  # e.g. "v0.1"; optional for host-provided backends
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +698,8 @@ def review_result_from_dict(data: dict[str, Any]) -> ReviewResult:
             else None
         ),
         raw_analysis=reviewer_data.get("raw_analysis"),
+        prompt_source=reviewer_data.get("prompt_source"),
+        prompt_version=reviewer_data.get("prompt_version"),
         latency_sec=reviewer_data.get("latency_sec"),
         input_tokens=reviewer_data.get("input_tokens"),
         output_tokens=reviewer_data.get("output_tokens"),

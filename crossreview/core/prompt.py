@@ -9,7 +9,11 @@ from typing import Any
 from crossreview.schema import to_serializable
 
 
-DEFAULT_REVIEWER_TEMPLATE = """# CrossReview Reviewer Prompt Template (v0 product)
+PRODUCT_REVIEWER_PROMPT_SOURCE = "product"
+PRODUCT_REVIEWER_PROMPT_VERSION = "v0.1"
+
+
+DEFAULT_REVIEWER_TEMPLATE = """# CrossReview Reviewer Prompt Template (product/v0.1)
 
 You are an independent code reviewer. You have NO access to the original development session, conversation history, or the author's reasoning process. You are seeing this code change for the first time.
 
@@ -46,6 +50,7 @@ You are an independent code reviewer. You have NO access to the original develop
 4. Do NOT rationalize. If something looks off, report it.
 5. Only report findings you can verify from the diff. If your analysis requires assumptions about unseen code or runtime behavior, move it to Observations.
 6. If the diff rewrites or transforms code, check semantic equivalence instead of only syntax.
+7. For shell, command, or parser rewrites, check statement-boundary and continuation semantics. For example, shell `&&` or `||` at line end can continue across a newline; do not assume every newline terminates the statement unless the diff proves that behavior.
 
 ## Your Output
 
