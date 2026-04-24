@@ -109,11 +109,22 @@
 
 ## Phase 1D — Fixture & Validation（🔜 进行中）
 
-- [ ] 1D.1 实现 eval harness（dev-only）
-- [ ] 1D.2 建立 fixture 格式（diff + context + manual baseline）
+- [x] 1D.1 实现 eval harness（dev-only）
+  - `crossreview_eval.py`（634 行）：离线聚合器，读取 fixture 目录，计算 release-gate 指标
+  - `tests/test_eval_harness.py`（534 行）：完整测试覆盖
+  - `fixtures/README.md`：fixture 格式定义（fixture.yaml / pack.json / review-result.json / manual-findings.yaml / auto-adjudications.yaml）
+  - 状态：框架已就绪，后续只做补齐/打磨，不是从零任务
+- [ ] 1D.2 Fixture 格式对齐与打磨
+  - 确保 eval harness 代码与 fixtures/README.md 格式定义完全一致
+  - 建立从 prompt-lab/cases → fixtures/ 的迁移规范
 - [ ] 1D.3 收集 ≥ 20 个真实 fixture
+  - 当前 fixtures/ 目录实际 fixture = 0
+  - prompt-lab/cases/ 有 13 个已验证 case，可形式化迁移
+  - 需额外新增 ≥ 7 个真实 diff fixture
 - [ ] 1D.4 达成 v0 release gates（v0-scope.md §12）
   - manual_recall ≥ 0.80, precision ≥ 0.70
   - invalid_findings_per_run ≤ 2, unclear_rate ≤ 0.15
   - context_fidelity ≥ 0.80, actionability ≥ 0.90
   - failure_rate ≤ 0.10, fixture_count ≥ 20
+
+**优先级**：1D.2/1D.3/1D.4 > 1B.7 > 1B.2（1D 是 v0 release gate blocker）

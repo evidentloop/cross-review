@@ -1,0 +1,79 @@
+fixture_id: "003-crossreview-review-fixes"
+run_id: "prompt-lab-v0-round1"
+adjudicated_at: "2026-04-22T17:00:00+08:00"
+reviewer_model: "claude-opus-4.6"
+adjudication_standard: |
+  valid = 当前 diff 直接引入、且从代码能站住的真实问题
+  observation = 事实正确但不算 finding，不计入 precision
+  invalid = 与代码事实不符，或对 unseen code/context 的错误推测
+adjudicator_notes: |
+  Reviewer 产出 8 条。f-001/f-002 是 pre-existing bugs，在 reviewer 看到的 diff 中明确可见
+  （rendered-prompt.md:143-145），后续 commit 已修复。按 adjudication 标准应按 reviewer
+  实际看到的 diff 判，不按当前 HEAD 判。f-005 匹配 manual baseline mf-001。recall = 1/1。
+
+findings:
+  - auto_finding_id: "f-001"
+    judgment: valid
+    provenance: preexisting_visible
+    counted_in_precision: true
+    matched_manual_id: null
+    actionability_judgment: actionable
+    notes: "真问题：diff 中 run.py .replace() 使用硬编码 literal filename list（rendered-prompt.md:143-144）。Pre-existing, perpetuated by diff, 后续 commit 已修复。"
+
+  - auto_finding_id: "f-002"
+    judgment: valid
+    provenance: preexisting_visible
+    counted_in_precision: true
+    matched_manual_id: null
+    actionability_judgment: actionable
+    notes: "真问题：diff 中 .replace('[]', ...) 全局匹配任何 []（rendered-prompt.md:145）。Pre-existing, perpetuated by diff, 后续 commit 已修复。"
+
+  - auto_finding_id: "f-003"
+    judgment: observation
+    provenance: n/a
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "Gitignore pattern 变窄的 speculative concern，无具体 breakage。"
+
+  - auto_finding_id: "f-004"
+    judgment: invalid
+    provenance: n/a
+    counted_in_precision: true
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "load_pack / load_template 有明确的 FileNotFoundError 和 sys.exit 路径，不是 silent fail。"
+
+  - auto_finding_id: "f-005"
+    judgment: valid
+    provenance: introduced
+    counted_in_precision: true
+    matched_manual_id: "mf-001"
+    actionability_judgment: actionable
+    notes: "匹配 mf-001：_normalize_list 对 dict 做 str(item) 产出 Python repr，降低 prompt 质量。"
+
+  - auto_finding_id: "f-006"
+    judgment: observation
+    provenance: n/a
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "Docs usability nit：anchor link 被移除而非修正。原 anchor 含 Unicode § 导致渲染问题。"
+
+  - auto_finding_id: "f-007"
+    judgment: invalid
+    provenance: speculative_unseen
+    counted_in_precision: true
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "文件已在 prior commit 中重命名完成，diff 只是对齐文档。"
+
+  - auto_finding_id: "f-008"
+    judgment: observation
+    provenance: n/a
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "CLI ergonomics 建议（用 argparse），不是 defect。"
+
+missed_manual_findings: []

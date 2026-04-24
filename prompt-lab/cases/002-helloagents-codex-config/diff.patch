@@ -1,0 +1,288 @@
+diff --git a/scripts/cli-codex-config.mjs b/scripts/cli-codex-config.mjs
+index 8535a69..b1a3d2a 100644
+--- a/scripts/cli-codex-config.mjs
++++ b/scripts/cli-codex-config.mjs
+@@ -1,6 +1,6 @@
+ import {
+-  upsertTopLevelTomlKey,
+-  removeTopLevelTomlLines,
++  prependTopLevelTomlBlocks,
++  removeTopLevelTomlBlock,
+   stripTomlSection,
+ } from './cli-toml.mjs'
+ 
+@@ -38,14 +38,53 @@ function formatManagedCodexModelInstructionsValue(filePath) {
+   return `"${normalizePath(filePath)}" ${CODEX_MANAGED_TOML_COMMENT}`
+ }
+ 
+-export function installCodexModelInstructions(toml, filePath) {
+-  const next = removeTopLevelTomlLines(
+-    toml,
+-    (line) => line.startsWith('model_instructions_file ='),
+-  ).text
+-  return upsertTopLevelTomlKey(
+-    next,
+-    'model_instructions_file',
+-    formatManagedCodexModelInstructionsValue(filePath),
++function formatManagedCodexModelInstructionsLine(filePath) {
++  return `model_instructions_file = ${formatManagedCodexModelInstructionsValue(filePath)}`
++}
++
++function formatManagedCodexNotifyValue(notifyScriptPath) {
++  return `["node", "${normalizePath(notifyScriptPath)}", "codex-notify"]`
++}
++
++function formatManagedCodexNotifyLine(notifyScriptPath) {
++  return `notify = ${formatManagedCodexNotifyValue(notifyScriptPath)}`
++}
++
++function removeTopLevelLinesBeingReplaced(toml, lines) {
++  let next = toml
++
++  for (const line of lines.map((value) => String(value || '').trim()).filter(Boolean)) {
++    const key = line.slice(0, line.indexOf('=')).trim()
++    if (!key) continue
++    next = removeTopLevelTomlBlock(next, key)
++  }
++
++  return next
++}
++
++function upsertOrderedCodexTopLevelLines(toml, lines) {
++  return prependTopLevelTomlBlocks(
++    removeTopLevelLinesBeingReplaced(toml, lines),
++    lines,
+   )
+ }
++
++export function installCodexModelInstructions(toml, filePath) {
++  return upsertOrderedCodexTopLevelLines(toml, [
++    formatManagedCodexModelInstructionsLine(filePath),
++  ])
++}
++
++export function installCodexManagedTopLevelConfig(toml, { modelInstructionsPath, notifyScriptPath }) {
++  return upsertOrderedCodexTopLevelLines(toml, [
++    formatManagedCodexModelInstructionsLine(modelInstructionsPath),
++    formatManagedCodexNotifyLine(notifyScriptPath),
++  ])
++}
++
++export function restoreCodexTopLevelConfig(toml, { modelInstructionsLine = '', notifyLine = '' }) {
++  return upsertOrderedCodexTopLevelLines(toml, [
++    modelInstructionsLine,
++    notifyLine,
++  ])
++}
+diff --git a/scripts/cli-codex.mjs b/scripts/cli-codex.mjs
+index 77fbcc9..0d3fd44 100644
+--- a/scripts/cli-codex.mjs
++++ b/scripts/cli-codex.mjs
+@@ -9,17 +9,16 @@ import { ensureTimestampedBackup, readCodexBackup, removeCodexBackup } from './c
+ import {
+   CODEX_MANAGED_TOML_COMMENT,
+   CODEX_PLUGIN_CONFIG_HEADER,
+-  installCodexModelInstructions,
++  installCodexManagedTopLevelConfig,
+   isManagedCodexBackupInstruction,
+   isManagedCodexModelInstruction,
+   isManagedCodexNotify,
+   removeCodexPluginConfig,
++  restoreCodexTopLevelConfig,
+   upsertCodexPluginConfig,
+ } from './cli-codex-config.mjs';
+ import {
+-  upsertTopLevelTomlKey,
+   readTopLevelTomlLine,
+-  ensureTopLevelTomlLine,
+   readTomlKeyInSection,
+   removeTomlKeyInSection,
+   ensureTomlKeyInSection,
+@@ -106,10 +105,6 @@ function removeCodexMarketplaceEntry(marketplaceFile) {
+   return true;
+ }
+ 
+-function normalizePath(path) {
+-  return path.replace(/\\/g, '/');
+-}
+-
+ function buildCodexRuntimeCarrier(bootstrapContent) {
+   const normalized = String(bootstrapContent || '').trim();
+   return normalized ? `${normalized}\n` : '';
+@@ -141,8 +136,10 @@ export function installCodexStandby(home, pkgRoot) {
+   let toml = safeRead(configPath) || '';
+   ensureTimestampedBackup(configPath, CODEX_CONFIG_BASENAME);
+ 
+-  toml = installCodexModelInstructions(toml, codexAgentsPath);
+-  toml = upsertTopLevelTomlKey(toml, 'notify', `["node", "${normalizePath(join(pkgRoot, 'scripts', 'notify.mjs'))}", "codex-notify"]`);
++  toml = installCodexManagedTopLevelConfig(toml, {
++    modelInstructionsPath: codexAgentsPath,
++    notifyScriptPath: join(pkgRoot, 'scripts', 'notify.mjs'),
++  });
+   safeWrite(configPath, toml);
+ 
+   createLink(pkgRoot, join(codexDir, 'helloagents'));
+@@ -168,16 +165,10 @@ export function uninstallCodexStandby(home) {
+     toml = removeTomlKeyInSection(toml, '[features]', 'codex_hooks');
+     const backupModelInstructions = readTopLevelTomlLine(backupToml, 'model_instructions_file');
+     const backupNotify = readTopLevelTomlLine(backupToml, 'notify');
+-    toml = ensureTopLevelTomlLine(
+-      toml,
+-      'model_instructions_file',
+-      isManagedCodexBackupInstruction(backupModelInstructions) ? '' : backupModelInstructions,
+-    );
+-    toml = ensureTopLevelTomlLine(
+-      toml,
+-      'notify',
+-      isManagedCodexNotify(backupNotify) ? '' : backupNotify,
+-    );
++    toml = restoreCodexTopLevelConfig(toml, {
++      modelInstructionsLine: isManagedCodexBackupInstruction(backupModelInstructions) ? '' : backupModelInstructions,
++      notifyLine: isManagedCodexNotify(backupNotify) ? '' : backupNotify,
++    });
+     toml = ensureTomlKeyInSection(toml, '[features]', 'codex_hooks', readTomlKeyInSection(backupToml, '[features]', 'codex_hooks'));
+     if (toml.trim()) safeWrite(configPath, toml);
+     else removeIfExists(configPath);
+@@ -236,12 +227,10 @@ export function installCodexGlobal(home, pkgRoot) {
+ 
+   let toml = safeRead(configPath) || '';
+   ensureTimestampedBackup(configPath, CODEX_CONFIG_BASENAME);
+-  toml = installCodexModelInstructions(toml, homeCarrierPath);
+-  toml = upsertTopLevelTomlKey(
+-    toml,
+-    'notify',
+-    `["node", "${normalizePath(join(pluginRoot, 'scripts', 'notify.mjs'))}", "codex-notify"]`,
+-  );
++  toml = installCodexManagedTopLevelConfig(toml, {
++    modelInstructionsPath: homeCarrierPath,
++    notifyScriptPath: join(pluginRoot, 'scripts', 'notify.mjs'),
++  });
+   toml = upsertCodexPluginConfig(toml);
+   safeWrite(configPath, toml);
+ 
+@@ -273,16 +262,10 @@ export function uninstallCodexGlobal(home) {
+     && line.includes('/plugins/helloagents/scripts/notify.mjs')).text;
+   const backupModelInstructions = readTopLevelTomlLine(backupToml, 'model_instructions_file');
+   const backupNotify = readTopLevelTomlLine(backupToml, 'notify');
+-  toml = ensureTopLevelTomlLine(
+-    toml,
+-    'model_instructions_file',
+-    isManagedCodexBackupInstruction(backupModelInstructions) ? '' : backupModelInstructions,
+-  );
+-  toml = ensureTopLevelTomlLine(
+-    toml,
+-    'notify',
+-    isManagedCodexNotify(backupNotify) ? '' : backupNotify,
+-  );
++  toml = restoreCodexTopLevelConfig(toml, {
++    modelInstructionsLine: isManagedCodexBackupInstruction(backupModelInstructions) ? '' : backupModelInstructions,
++    notifyLine: isManagedCodexNotify(backupNotify) ? '' : backupNotify,
++  });
+   toml = ensureTomlKeyInSection(toml, '[features]', 'codex_hooks', readTomlKeyInSection(backupToml, '[features]', 'codex_hooks'));
+   if (toml.trim()) safeWrite(configPath, toml);
+   else removeIfExists(configPath);
+diff --git a/scripts/cli-toml.mjs b/scripts/cli-toml.mjs
+index 726a872..8228004 100644
+--- a/scripts/cli-toml.mjs
++++ b/scripts/cli-toml.mjs
+@@ -33,6 +33,15 @@ function findFirstTomlSectionIndex(text) {
+   return normalized.length;
+ }
+ 
++function splitTopLevelToml(text) {
++  const normalized = String(text || '').replace(/\r\n/g, '\n');
++  const topLevelEnd = findFirstTomlSectionIndex(normalized);
++  return {
++    topLevel: normalized.slice(0, topLevelEnd),
++    sections: normalized.slice(topLevelEnd),
++  };
++}
++
+ function findTopLevelTomlBlock(text, key) {
+   const normalized = String(text || '').replace(/\r\n/g, '\n');
+   const topLevelEnd = findFirstTomlSectionIndex(normalized);
+@@ -93,6 +102,27 @@ export function removeTopLevelTomlBlock(text, key) {
+   return normalizeToml(`${normalized.slice(0, existing.start)}${normalized.slice(existing.end)}`);
+ }
+ 
++export function prependTopLevelTomlBlocks(text, blocks) {
++  const normalizedBlocks = blocks
++    .map((block) => String(block || '').trim())
++    .filter(Boolean);
++
++  const { topLevel, sections } = splitTopLevelToml(text);
++  const normalizedTopLevel = topLevel.replace(/^\n+/, '').trimEnd();
++  const normalizedSections = sections.replace(/^\n+/, '').trimEnd();
++  const remainder = normalizedTopLevel && normalizedSections
++    ? `${normalizedTopLevel}\n\n${normalizedSections}`
++    : normalizedTopLevel || normalizedSections;
++  if (!normalizedBlocks.length) return normalizeToml(remainder);
++  const managedPrelude = normalizedBlocks.join('\n');
++
++  return normalizeToml(
++    remainder
++      ? `${managedPrelude}\n\n${remainder}`
++      : managedPrelude,
++  );
++}
++
+ export function upsertTopLevelTomlKey(text, key, value) {
+   const re = new RegExp(`^${key}\\s*=.*$`, 'm');
+   const next = re.test(text)
+diff --git a/tests/install-lifecycle-all.test.mjs b/tests/install-lifecycle-all.test.mjs
+index 7406730..daf84e9 100644
+--- a/tests/install-lifecycle-all.test.mjs
++++ b/tests/install-lifecycle-all.test.mjs
+@@ -36,6 +36,7 @@ test('CLI lifecycle covers standby, global, update, cleanup, and config preserva
+   assert.match(codexConfig, new RegExp(`model_instructions_file = "${codexAgentsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`))
+   assert.doesNotMatch(codexConfig, /developer_instructions\s*=/)
+   assert.match(codexConfig, /codex-notify/)
++  assert.match(codexConfig, /^model_instructions_file = ".*\/\.codex\/AGENTS\.md" # helloagents-managed\nnotify = \["node", ".*\/scripts\/notify\.mjs", "codex-notify"\]\n\n\[features\]\nexperimental = true\n/m)
+   assert.ok(hasTimestampedBackup(home, 'config.toml'))
+   assert.equal(realTarget(join(home, '.claude', 'helloagents')), pkgRoot)
+   assert.equal(realTarget(join(home, '.gemini', 'helloagents')), pkgRoot)
+@@ -60,6 +61,7 @@ test('CLI lifecycle covers standby, global, update, cleanup, and config preserva
+   const globalCodexConfig = readText(codexConfigPath)
+   assert.match(globalCodexConfig, new RegExp(`model_instructions_file = "${codexAgentsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`))
+   assert.match(globalCodexConfig, /plugins\/helloagents\/scripts\/notify\.mjs/)
++  assert.match(globalCodexConfig, /^model_instructions_file = ".*\/\.codex\/AGENTS\.md" # helloagents-managed\nnotify = \["node", ".*\/plugins\/helloagents\/scripts\/notify\.mjs", "codex-notify"\]\n\n\[features\]\nexperimental = true\n/m)
+   assert.match(globalCodexConfig, /\[plugins\."helloagents@local-plugins"\]\s+enabled = true/)
+   assert.doesNotMatch(globalCodexConfig, /developer_instructions\s*=/)
+ 
+diff --git a/tests/install-lifecycle-codex.test.mjs b/tests/install-lifecycle-codex.test.mjs
+index 7099689..c45199b 100644
+--- a/tests/install-lifecycle-codex.test.mjs
++++ b/tests/install-lifecycle-codex.test.mjs
+@@ -88,6 +88,32 @@ test('Codex standby replaces a user-owned model_instructions_file with the manag
+   assert.equal(readText(join(home, '.codex', 'AGENTS.md')), '# Codex custom\n')
+ })
+ 
++test('Codex standby keeps model_instructions_file before notify and separates managed lines from later fields', () => {
++  const { root: pkgRoot } = createPackageFixture()
++  const home = createHomeFixture()
++
++  writeText(
++    join(home, '.codex', 'config.toml'),
++    [
++      'approval_policy = "never"',
++      'sandbox_mode = "danger-full-access"',
++      '',
++      '[features]',
++      'experimental = true',
++      '',
++    ].join('\n'),
++  )
++
++  runCli(pkgRoot, home, ['postinstall'])
++  runCli(pkgRoot, home, ['install', 'codex', '--standby'])
++
++  const installedConfig = readText(join(home, '.codex', 'config.toml'))
++  assert.match(
++    installedConfig,
++    /^model_instructions_file = ".*\/\.codex\/AGENTS\.md" # helloagents-managed\nnotify = \["node", ".*\/scripts\/notify\.mjs", "codex-notify"\]\n\napproval_policy = "never"\nsandbox_mode = "danger-full-access"\n\n\[features\]\nexperimental = true\n/,
++  )
++})
++
+ test('Codex standby leaves a user-owned developer_instructions block untouched', () => {
+   const { root: pkgRoot } = createPackageFixture()
+   const home = createHomeFixture()

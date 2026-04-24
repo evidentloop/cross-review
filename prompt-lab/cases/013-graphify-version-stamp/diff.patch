@@ -1,0 +1,90 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 6a6a8cd..42ef88c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,11 @@
+ 
+ Full release notes with details on each version: [GitHub Releases](https://github.com/safishamsi/graphify/releases)
+ 
++## 0.4.23 (2026-04-18)
++
++- Fix: stale skill version warning persists after running `graphify install` when multiple platforms were previously installed — `graphify install` now refreshes `.graphify_version` in all other known skill directories so the warning clears across the board (#178)
++- Fix: `.html` files silently skipped during detection — added `.html` to `DOC_EXTENSIONS`; HTML pages, docs, and web project content now indexed correctly (#260)
++
+ ## 0.4.22 (2026-04-18)
+ 
+ - Fix: AST cache written to `src/graphify-out/cache/` instead of project root when all code files share a common prefix like `src/` — `extract()` now called with explicit `cache_root=watch_path` in `_rebuild_code` and `cache_root=Path('.')` in the Codex skill AST step (#429)
+diff --git a/README.md b/README.md
+index 24e78c6..0b282f6 100644
+--- a/README.md
++++ b/README.md
+@@ -311,7 +311,7 @@ Works with any mix of file types:
+ | Type | Extensions | Extraction |
+ |------|-----------|------------|
+ | Code | `.py .ts .js .jsx .tsx .mjs .go .rs .java .c .cpp .rb .cs .kt .scala .php .swift .lua .zig .ps1 .ex .exs .m .mm .jl .vue .svelte` | AST via tree-sitter + call-graph (cross-file for all languages) + docstring/comment rationale |
+-| Docs | `.md .mdx .txt .rst` | Concepts + relationships + design rationale via Claude |
++| Docs | `.md .mdx .html .txt .rst` | Concepts + relationships + design rationale via Claude |
+ | Office | `.docx .xlsx` | Converted to markdown then extracted via Claude (requires `pip install graphifyy[office]`) |
+ | Papers | `.pdf` | Citation mining + concept extraction |
+ | Images | `.png .jpg .webp .gif` | Claude vision - screenshots, diagrams, any language |
+diff --git a/graphify/__main__.py b/graphify/__main__.py
+index e9e39a2..da0e15f 100644
+--- a/graphify/__main__.py
++++ b/graphify/__main__.py
+@@ -23,6 +23,19 @@ def _check_skill_version(skill_dst: Path) -> None:
+     if installed != __version__:
+         print(f"  warning: skill is from graphify {installed}, package is {__version__}. Run 'graphify install' to update.")
+ 
++
++def _refresh_all_version_stamps() -> None:
++    """After a successful install, update .graphify_version in all other known skill dirs.
++
++    Prevents stale-version warnings from platforms that were installed previously
++    but not explicitly re-installed during this upgrade.
++    """
++    for cfg in _PLATFORM_CONFIG.values():
++        vf = Path.home() / cfg["skill_dst"]
++        vf = vf.parent / ".graphify_version"
++        if vf.exists():
++            vf.write_text(__version__, encoding="utf-8")
++
+ _SETTINGS_HOOK = {
+     "matcher": "Glob|Grep",
+     "hooks": [
+@@ -159,6 +172,10 @@ def install(platform: str = "claude") -> None:
+     if platform == "opencode":
+         _install_opencode_plugin(Path("."))
+ 
++    # Refresh version stamps in all other previously-installed skill dirs so
++    # stale-version warnings don't fire for platforms not explicitly re-installed.
++    _refresh_all_version_stamps()
++
+     print()
+     print("Done. Open your AI coding assistant and type:")
+     print()
+diff --git a/graphify/detect.py b/graphify/detect.py
+index a01f953..98cff16 100644
+--- a/graphify/detect.py
++++ b/graphify/detect.py
+@@ -19,7 +19,7 @@ class FileType(str, Enum):
+ _MANIFEST_PATH = "graphify-out/manifest.json"
+ 
+ CODE_EXTENSIONS = {'.py', '.ts', '.js', '.jsx', '.tsx', '.mjs', '.ejs', '.go', '.rs', '.java', '.cpp', '.cc', '.cxx', '.c', '.h', '.hpp', '.rb', '.swift', '.kt', '.kts', '.cs', '.scala', '.php', '.lua', '.toc', '.zig', '.ps1', '.ex', '.exs', '.m', '.mm', '.jl', '.vue', '.svelte', '.dart', '.v', '.sv'}
+-DOC_EXTENSIONS = {'.md', '.mdx', '.txt', '.rst'}
++DOC_EXTENSIONS = {'.md', '.mdx', '.txt', '.rst', '.html'}
+ PAPER_EXTENSIONS = {'.pdf'}
+ IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
+ OFFICE_EXTENSIONS = {'.docx', '.xlsx'}
+diff --git a/pyproject.toml b/pyproject.toml
+index e18e885..37c4a80 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "graphifyy"
+-version = "0.4.22"
++version = "0.4.23"
+ description = "AI coding assistant skill (Claude Code, Codex, OpenCode, Cursor, Gemini CLI, Aider, OpenClaw, Factory Droid, Trae, Hermes, Kiro, Google Antigravity) - turn any folder of code, docs, papers, images, or videos into a queryable knowledge graph"
+ readme = "README.md"
+ license = { file = "LICENSE" }

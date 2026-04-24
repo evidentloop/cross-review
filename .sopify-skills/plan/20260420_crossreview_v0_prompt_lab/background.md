@@ -18,7 +18,10 @@
 - Phase 1A Schema & Config — ✅ 全部完成。
 - Phase 1B Core Pipeline — ✅ 大部分完成（evidence collector 和 output formatter 除外）。
 - Phase 1C CLI — ✅ pack / verify / render-prompt / ingest 全部完成。
-- Phase 1D Fixture & Validation — 🔜 进行中，eval harness 已有基础框架。
+- Phase 1D Fixture & Validation — 🔜 进行中。
+  - eval harness 框架已就绪（`crossreview_eval.py` 634 行 + 534 行测试），不是从零任务
+  - 实际 fixture = 0，Prompt Lab 有 13 个 case 待迁移/形式化
+  - 下一步重点：1D.2/1D.3/1D.4（fixture 资产建设 + release gates 达标）
 
 Host-integrated CLI 通道（render-prompt + ingest）已实现。宿主集成不需要实现 Python `ReviewerBackend`；集成方式是 `crossreview render-prompt` → 宿主隔离执行 → `crossreview ingest` 回传。
 

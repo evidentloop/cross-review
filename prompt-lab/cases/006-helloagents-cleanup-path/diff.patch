@@ -1,0 +1,260 @@
+diff --git a/README.md b/README.md
+index 504125a..20879c4 100644
+--- a/README.md
++++ b/README.md
+@@ -249,7 +249,8 @@ HelloAGENTS touches different files depending on mode. The write/cleanup rules a
+ - **Standby mode** uses symlinks for `~/.claude/helloagents`, `~/.gemini/helloagents`, and `~/.codex/helloagents`, so local file or branch changes are visible immediately.
+ - **Codex global mode** uses copied runtime files. Re-running `helloagents --global` refreshes both `~/plugins/helloagents/` and the Codex cache copy.
+ - Re-running the current mode command is supported intentionally: `helloagents --standby` and `helloagents --global` both act as **switch-or-refresh** commands.
+-- `npm uninstall -g helloagents` cleans CLI injections and plugin/cache artifacts but intentionally preserves `~/.helloagents/helloagents.json`.
++- For deterministic manual cleanup, run `helloagents cleanup` before `npm uninstall -g helloagents`.
++- `npm uninstall -g helloagents` removes the package; `~/.helloagents/helloagents.json` is intentionally preserved.
+ 
+ ## 📖 Commands
+ 
+diff --git a/README_CN.md b/README_CN.md
+index fa33c9c..bbe43df 100644
+--- a/README_CN.md
++++ b/README_CN.md
+@@ -249,7 +249,8 @@ HelloAGENTS 在不同模式下会写入不同文件，但写入/恢复/清理都
+ - **标准模式** 使用 `~/.claude/helloagents`、`~/.gemini/helloagents`、`~/.codex/helloagents` 这三个符号链接，本地文件或分支变化会立即生效。
+ - **Codex 全局模式** 使用复制后的运行时文件。重新执行 `helloagents --global` 会刷新 `~/plugins/helloagents/` 和 Codex cache 中的副本。
+ - 重新执行当前模式命令是被支持的：`helloagents --standby` 和 `helloagents --global` 都是 **切换或刷新** 命令。
+-- `npm uninstall -g helloagents` 会清理 CLI 注入和插件/cache 产物，但会有意保留 `~/.helloagents/helloagents.json`。
++- 如需确定性的手动清理，先执行 `helloagents cleanup`，再执行 `npm uninstall -g helloagents`。
++- `npm uninstall -g helloagents` 会移除包本身；`~/.helloagents/helloagents.json` 会被有意保留。
+ 
+ ## 📖 命令
+ 
+diff --git a/cli.mjs b/cli.mjs
+index 04227c7..3129657 100644
+--- a/cli.mjs
++++ b/cli.mjs
+@@ -118,6 +118,15 @@ if (cmd === 'postinstall') {
+     '  ℹ ~/.helloagents/ preserved (delete manually if desired)\n  ℹ If Claude Code plugin installed, run: /plugin remove helloagents\n  ℹ If Gemini CLI extension installed, run: gemini extensions uninstall helloagents',
+   ));
+   console.log();
++} else if (cmd === 'cleanup' || cmd === '--cleanup') {
++  console.log(`\n  HelloAGENTS — ${msg('正在清理', 'Cleaning up')}\n`);
++  uninstallAll();
++  ok(msg('所有 CLI 配置已清理', 'All CLI configurations cleaned'));
++  console.log(msg(
++    '  ℹ ~/.helloagents/ 已保留（如需彻底清理请手动删除）\n  ℹ 如已安装 Claude Code 插件，请手动执行: /plugin remove helloagents\n  ℹ 如已安装 Gemini CLI 扩展，请手动执行: gemini extensions uninstall helloagents',
++    '  ℹ ~/.helloagents/ preserved (delete manually if desired)\n  ℹ If Claude Code plugin installed, run: /plugin remove helloagents\n  ℹ If Gemini CLI extension installed, run: gemini extensions uninstall helloagents',
++  ));
++  console.log();
+ } else if (cmd === 'sync-version') {
+   syncVersion();
+ } else if (cmd === '--global' || cmd === '--standby') {
+diff --git a/package.json b/package.json
+index a5582d8..7a56158 100644
+--- a/package.json
++++ b/package.json
+@@ -18,6 +18,8 @@
+     "test": "node --test",
+     "postinstall": "node cli.mjs postinstall",
+     "preuninstall": "node cli.mjs preuninstall",
++    "uninstall": "node cli.mjs preuninstall",
++    "postuninstall": "node cli.mjs preuninstall",
+     "prepublishOnly": "node cli.mjs sync-version"
+   },
+   "files": [
+diff --git a/scripts/cli-codex.mjs b/scripts/cli-codex.mjs
+index 0eb0749..63ccc30 100644
+--- a/scripts/cli-codex.mjs
++++ b/scripts/cli-codex.mjs
+@@ -46,6 +46,14 @@ function removeCodexPluginConfig(text) {
+   return stripTomlSection(text, CODEX_PLUGIN_CONFIG_HEADER).text;
+ }
+ 
++function isManagedCodexModelInstruction(line = '') {
++  return line.includes('helloagents') && line.includes('model_instructions_file');
++}
++
++function isManagedCodexNotify(line = '') {
++  return line.includes('codex-notify') || (line.includes('helloagents') && line.includes('notify'));
++}
++
+ function getDefaultCodexMarketplace() {
+   return {
+     name: CODEX_MARKETPLACE_NAME,
+@@ -154,8 +162,18 @@ export function uninstallCodexStandby(home) {
+         return false;
+       }).text;
+       toml = removeTomlKeyInSection(toml, '[features]', 'codex_hooks');
+-      toml = ensureTopLevelTomlLine(toml, 'model_instructions_file', readTopLevelTomlLine(backupToml, 'model_instructions_file'));
+-      toml = ensureTopLevelTomlLine(toml, 'notify', readTopLevelTomlLine(backupToml, 'notify'));
++      const backupModelInstructions = readTopLevelTomlLine(backupToml, 'model_instructions_file');
++      const backupNotify = readTopLevelTomlLine(backupToml, 'notify');
++      toml = ensureTopLevelTomlLine(
++        toml,
++        'model_instructions_file',
++        isManagedCodexModelInstruction(backupModelInstructions) ? '' : backupModelInstructions,
++      );
++      toml = ensureTopLevelTomlLine(
++        toml,
++        'notify',
++        isManagedCodexNotify(backupNotify) ? '' : backupNotify,
++      );
+       toml = ensureTomlKeyInSection(toml, '[features]', 'codex_hooks', readTomlKeyInSection(backupToml, '[features]', 'codex_hooks'));
+       if (toml.trim()) safeWrite(configPath, toml);
+       else removeIfExists(configPath);
+@@ -246,8 +264,18 @@ export function uninstallCodexGlobal(home) {
+   toml = removeTopLevelTomlLines(toml, (line) =>
+     line.startsWith('notify =')
+     && line.includes('/plugins/helloagents/scripts/notify.mjs')).text;
+-  toml = ensureTopLevelTomlLine(toml, 'model_instructions_file', readTopLevelTomlLine(backupToml, 'model_instructions_file'));
+-  toml = ensureTopLevelTomlLine(toml, 'notify', readTopLevelTomlLine(backupToml, 'notify'));
++  const backupModelInstructions = readTopLevelTomlLine(backupToml, 'model_instructions_file');
++  const backupNotify = readTopLevelTomlLine(backupToml, 'notify');
++  toml = ensureTopLevelTomlLine(
++    toml,
++    'model_instructions_file',
++    isManagedCodexModelInstruction(backupModelInstructions) ? '' : backupModelInstructions,
++  );
++  toml = ensureTopLevelTomlLine(
++    toml,
++    'notify',
++    isManagedCodexNotify(backupNotify) ? '' : backupNotify,
++  );
+   toml = ensureTomlKeyInSection(toml, '[features]', 'codex_hooks', readTomlKeyInSection(backupToml, '[features]', 'codex_hooks'));
+   if (toml.trim()) safeWrite(configPath, toml);
+   else removeIfExists(configPath);
+diff --git a/scripts/cli-messages.mjs b/scripts/cli-messages.mjs
+index 165fa67..5872a02 100644
+--- a/scripts/cli-messages.mjs
++++ b/scripts/cli-messages.mjs
+@@ -69,6 +69,7 @@ ${msg('模式切换', 'Mode switching')}:
+   helloagents --standby    ${msg('标准模式（非插件安装，hello-* 不自动触发，默认）', "Standby mode (non-plugin install, hello-* won't auto-trigger, default)")}
+ 
+ ${msg('卸载', 'Uninstall')}:
++  helloagents cleanup      ${msg('（推荐先执行，显式清理所有 CLI 注入/链接）', '(recommended first, explicitly cleans CLI injections/links)')}
+   npm uninstall -g helloagents
+   ${msg('如已安装插件，另需手动移除：', 'If plugins installed, also remove manually:')}
+     Claude Code:  /plugin remove helloagents
+diff --git a/tests/helpers/test-env.mjs b/tests/helpers/test-env.mjs
+index d73c9c0..2bb85a1 100644
+--- a/tests/helpers/test-env.mjs
++++ b/tests/helpers/test-env.mjs
+@@ -63,7 +63,11 @@ export function readJson(filePath) {
+ }
+ 
+ export function runNode(scriptPath, args = [], options = {}) {
+-  const result = spawnSync(process.execPath, [scriptPath, ...args], {
++  return runCommand(process.execPath, [scriptPath, ...args], options);
++}
++
++export function runCommand(command, args = [], options = {}) {
++  const result = spawnSync(command, args, {
+     cwd: options.cwd,
+     env: { ...process.env, ...(options.env || {}) },
+     input: options.input,
+diff --git a/tests/install-lifecycle.test.mjs b/tests/install-lifecycle.test.mjs
+index 82463ef..2004bbb 100644
+--- a/tests/install-lifecycle.test.mjs
++++ b/tests/install-lifecycle.test.mjs
+@@ -173,3 +173,40 @@ test('Codex global cleanup still removes marketplace and plugin roots when .code
+   assert.ok(!existsSync(join(home, 'plugins', 'helloagents')));
+   assert.ok(!existsSync(join(home, '.agents', 'plugins', 'marketplace.json')));
+ });
++
++test('Codex cleanup ignores contaminated backups and strips managed config lines', () => {
++  const { root: pkgRoot } = createPackageFixture();
++  const home = createHomeFixture();
++
++  writeText(
++    join(home, '.codex', 'config.toml'),
++    [
++      'model_instructions_file = "D:/GitHub/dev/helloagents/bootstrap-lite.md"',
++      'notify = ["node", "D:/GitHub/dev/helloagents/scripts/notify.mjs", "codex-notify"]',
++      '',
++      '[features]',
++      'codex_hooks = true',
++      'unified_exec = true',
++      '',
++    ].join('\n'),
++  );
++  writeText(
++    join(home, '.codex', 'config.toml.bak'),
++    [
++      'model_instructions_file = "D:/GitHub/dev/helloagents/bootstrap-lite.md"',
++      'notify = ["node", "D:/GitHub/dev/helloagents/scripts/notify.mjs", "codex-notify"]',
++      '',
++      '[features]',
++      'codex_hooks = true',
++      '',
++    ].join('\n'),
++  );
++
++  runCli(pkgRoot, home, ['cleanup']);
++
++  const cleaned = readText(join(home, '.codex', 'config.toml'));
++  assert.doesNotMatch(cleaned, /bootstrap-lite\.md/);
++  assert.doesNotMatch(cleaned, /codex-notify/);
++  assert.doesNotMatch(cleaned, /codex_hooks = true/);
++  assert.match(cleaned, /unified_exec = true/);
++});
+diff --git a/tests/npm-lifecycle.test.mjs b/tests/npm-lifecycle.test.mjs
+new file mode 100644
+index 0000000..d6725c4
+--- /dev/null
++++ b/tests/npm-lifecycle.test.mjs
+@@ -0,0 +1,58 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { existsSync } from 'node:fs';
++import { join } from 'node:path';
++
++import {
++  buildHomeEnv,
++  createHomeFixture,
++  createPackageFixture,
++  createTempDir,
++  readText,
++  runCommand,
++  writeJson,
++  writeText,
++} from './helpers/test-env.mjs';
++
++function runNpm(args, cwd, env) {
++  const npmCli = process.env.npm_execpath;
++  assert.ok(npmCli, 'npm_execpath is required for lifecycle testing');
++  const result = runCommand(process.execPath, [npmCli, ...args], { cwd, env });
++  assert.equal(result.status, 0, result.stderr || result.stdout);
++  return result;
++}
++
++test('npm global install plus explicit cleanup command removes lifecycle artifacts', () => {
++  const { root: pkgRoot } = createPackageFixture();
++  const home = createHomeFixture();
++  const prefix = createTempDir('helloagents-prefix-');
++  const packDir = createTempDir('helloagents-pack-');
++  const env = buildHomeEnv(home);
++
++  writeText(join(home, '.claude', 'CLAUDE.md'), '# Claude custom\n');
++  writeJson(join(home, '.claude', 'settings.json'), { permissions: { allow: ['Read(*)'] } });
++  writeText(join(home, '.codex', 'AGENTS.md'), '# Codex custom\n');
++  writeText(join(home, '.codex', 'config.toml'), 'model_instructions_file = "C:/original/bootstrap.md"\n');
++
++  runNpm(['pack', '--pack-destination', packDir], pkgRoot, env);
++  const tarball = join(packDir, 'helloagents-3.0.0.tgz');
++
++  runNpm(['install', '-g', '--prefix', prefix, tarball], pkgRoot, env);
++
++  assert.ok(existsSync(join(home, '.claude', 'helloagents')));
++  assert.ok(existsSync(join(home, '.codex', 'helloagents')));
++  assert.match(readText(join(home, '.claude', 'CLAUDE.md')), /HELLOAGENTS_START/);
++
++  const cleanup = runCommand(process.execPath, [join(pkgRoot, 'cli.mjs'), 'cleanup'], {
++    cwd: pkgRoot,
++    env,
++  });
++  assert.equal(cleanup.status, 0, cleanup.stderr || cleanup.stdout);
++
++  assert.ok(!existsSync(join(home, '.claude', 'helloagents')));
++  assert.ok(!existsSync(join(home, '.codex', 'helloagents')));
++  assert.doesNotMatch(readText(join(home, '.claude', 'CLAUDE.md')), /HELLOAGENTS_START/);
++  assert.doesNotMatch(readText(join(home, '.codex', 'AGENTS.md')), /HELLOAGENTS_START/);
++
++  runNpm(['uninstall', '-g', '--prefix', prefix, 'helloagents'], pkgRoot, env);
++});

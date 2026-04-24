@@ -1,0 +1,92 @@
+fixture_id: "001-hermes-subshell-leak"
+run_id: "prompt-lab-v0-round1"
+adjudicated_at: "2026-04-22T17:00:00+08:00"
+reviewer_model: "claude-opus-4.6"
+adjudication_standard: |
+  valid = 当前 diff 直接引入、且从代码能站住的真实问题
+  observation = 事实正确但不算 finding（style/test suggestion/clean-diff note），不计入 precision
+  unclear = 同类风险存在，但证据不足
+  invalid = 与代码事实不符，或对 unseen code 的错误推测
+adjudicator_notes: |
+  Reviewer 产出 9 条，但漏掉了 baseline 的 mf-001（same-line chain 语义变化）和 mf-002（多行 continuation）。
+  唯一的 valid finding (backtick blind spot) 是 reviewer 自行发现的新问题，不在 baseline 内。
+  recall against baseline = 0/2。
+
+findings:
+  - auto_finding_id: "f-001"
+    judgment: valid
+    provenance: introduced
+    counted_in_precision: true
+    matched_manual_id: null
+    actionability_judgment: actionable
+    notes: "真问题：_read_shell_token 不处理 backtick command substitution。新引入函数中的 parser blind spot。"
+
+  - auto_finding_id: "f-002"
+    judgment: observation
+    provenance: n/a
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "只是 missing test，不是 defect。代码通过 paren-depth 正确处理了 unquoted $(...)。"
+
+  - auto_finding_id: "f-003"
+    judgment: unclear
+    provenance: introduced
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: unclear
+    notes: "Here-doc/here-string gap 大概率存在，但 reviewer 自己也用了 'may incorrectly'。证据不足。"
+
+  - auto_finding_id: "f-004"
+    judgment: invalid
+    provenance: speculative_unseen
+    counted_in_precision: true
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "base.py:758 _prepare_command contract 是 str → tuple[str, str|None]，exec_command 不会是 None。"
+
+  - auto_finding_id: "f-005"
+    judgment: observation
+    provenance: n/a
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "Lazy import 是实现风格选择（大概率避免循环依赖），不是 finding。"
+
+  - auto_finding_id: "f-006"
+    judgment: unclear
+    provenance: introduced
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: unclear
+    notes: "A && { B ; } & 同类风险可能存在，但更像 follow-up scope，证据不够稳。"
+
+  - auto_finding_id: "f-007"
+    judgment: invalid
+    provenance: speculative_unseen
+    counted_in_precision: true
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "已验证：_prepare_command (base.py:758) 只做 sudo transform，不会包成 bash -c。"
+
+  - auto_finding_id: "f-008"
+    judgment: observation
+    provenance: n/a
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "无空格变体不是 bug，bash 能正确 parse。只是输出可读性建议。"
+
+  - auto_finding_id: "f-009"
+    judgment: observation
+    provenance: n/a
+    counted_in_precision: false
+    matched_manual_id: null
+    actionability_judgment: not_actionable
+    notes: "测试质量建议，不是 defect。"
+
+missed_manual_findings:
+  - manual_id: "mf-001"
+    notes: "Reviewer 未发现 same-line `A && B & sleep 1` 产生语义不同的合法语法（时序变化，非无效语法）。"
+  - manual_id: "mf-002"
+    notes: "Reviewer 未发现 bash `A &&\\nB &` 是 continuation（不是新语句），newline reset 在此 pattern 下不正确。"

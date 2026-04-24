@@ -1,0 +1,301 @@
+diff --git a/tests/tools/test_file_operations.py b/tests/tools/test_file_operations.py
+index dc8ccbde..b379fefc 100644
+--- a/tests/tools/test_file_operations.py
++++ b/tests/tools/test_file_operations.py
+@@ -355,3 +355,101 @@ class TestShellFileOpsWriteDenied:
+         result = ops.move_file("/tmp/nonexistent.txt", "/tmp/dest.txt")
+         assert result.error is not None
+         assert "Failed to move" in result.error
++
++
++class TestPatchReplacePostWriteVerification:
++    """Tests for the post-write verification added in patch_replace.
++
++    Confirms that a silent persistence failure (where write_file's command
++    appears to succeed but the bytes on disk don't match new_content) is
++    surfaced as an error instead of being reported as a successful patch.
++    """
++
++    def test_patch_replace_fails_when_file_not_persisted(self, mock_env):
++        """write_file reports success but the re-read returns old content:
++        patch_replace must return an error, not success-with-diff."""
++        file_contents = {"/tmp/test/a.py": "hello world\n"}
++
++        def side_effect(command, **kwargs):
++            # cat reads the file — both the initial read and the verify read
++            if command.startswith("cat "):
++                # Extract path from cat command (strip quotes)
++                for path in file_contents:
++                    if path in command:
++                        return {"output": file_contents[path], "returncode": 0}
++                return {"output": "", "returncode": 1}
++            # mkdir for parent dir
++            if command.startswith("mkdir "):
++                return {"output": "", "returncode": 0}
++            # wc -c for byte count after write
++            if command.startswith("wc -c"):
++                for path in file_contents:
++                    if path in command:
++                        return {"output": str(len(file_contents[path].encode())), "returncode": 0}
++                return {"output": "0", "returncode": 0}
++            # Everything else (including the write itself) pretends to succeed
++            # but DOESN'T update file_contents — simulates silent failure
++            return {"output": "", "returncode": 0}
++
++        mock_env.execute.side_effect = side_effect
++        ops = ShellFileOperations(mock_env)
++        result = ops.patch_replace("/tmp/test/a.py", "hello", "hi")
++        assert result.error is not None, (
++            "Silent persistence failure must surface as error, got: "
++            f"success={result.success}, diff={result.diff}"
++        )
++        assert "verification failed" in result.error.lower()
++        assert "did not persist" in result.error.lower()
++
++    def test_patch_replace_succeeds_when_file_persisted(self, mock_env):
++        """Normal success path: write persists, verify read returns new bytes."""
++        state = {"content": "hello world\n"}
++
++        def side_effect(command, stdin_data=None, **kwargs):
++            # Write is `cat > path` — detect by the `>` redirect, NOT just `cat `
++            if command.startswith("cat >"):
++                if stdin_data is not None:
++                    state["content"] = stdin_data
++                return {"output": "", "returncode": 0}
++            if command.startswith("cat "):  # read
++                return {"output": state["content"], "returncode": 0}
++            if command.startswith("mkdir "):
++                return {"output": "", "returncode": 0}
++            if command.startswith("wc -c"):
++                return {"output": str(len(state["content"].encode())), "returncode": 0}
++            return {"output": "", "returncode": 0}
++
++        mock_env.execute.side_effect = side_effect
++        ops = ShellFileOperations(mock_env)
++        result = ops.patch_replace("/tmp/test/a.py", "hello", "hi")
++        assert result.error is None, f"Unexpected error: {result.error}"
++        assert result.success is True
++        assert state["content"] == "hi world\n", f"File not actually updated: {state['content']!r}"
++
++    def test_patch_replace_fails_when_verify_read_errors(self, mock_env):
++        """If the verify-read step itself fails (exit code != 0), return an error."""
++        call_count = {"cat": 0}
++        state = {"content": "hello world\n"}
++
++        def side_effect(command, stdin_data=None, **kwargs):
++            if command.startswith("cat >"):  # write
++                if stdin_data is not None:
++                    state["content"] = stdin_data
++                return {"output": "", "returncode": 0}
++            if command.startswith("cat "):  # read
++                call_count["cat"] += 1
++                # First read (initial fetch) succeeds; second read (verify) fails
++                if call_count["cat"] == 1:
++                    return {"output": state["content"], "returncode": 0}
++                return {"output": "", "returncode": 1}
++            if command.startswith("mkdir "):
++                return {"output": "", "returncode": 0}
++            if command.startswith("wc -c"):
++                return {"output": str(len(state["content"].encode())), "returncode": 0}
++            return {"output": "", "returncode": 0}
++
++        mock_env.execute.side_effect = side_effect
++        ops = ShellFileOperations(mock_env)
++        result = ops.patch_replace("/tmp/test/a.py", "hello", "hi")
++        assert result.error is not None
++        assert "could not re-read" in result.error.lower()
+diff --git a/tests/tools/test_fuzzy_match.py b/tests/tools/test_fuzzy_match.py
+index c1dbc544..7a03065f 100644
+--- a/tests/tools/test_fuzzy_match.py
++++ b/tests/tools/test_fuzzy_match.py
+@@ -147,4 +147,86 @@ class TestStrategyNameSurfaced:
+         new, count, strategy, err = fuzzy_find_and_replace("hello", "xyz", "world")
+         assert count == 0
+         assert strategy is None
+-        assert err is not None
++
++
++class TestEscapeDriftGuard:
++    """Tests for the escape-drift guard that catches bash/JSON serialization
++    artifacts where an apostrophe gets prefixed with a spurious backslash
++    in tool-call transport.
++    """
++
++    def test_drift_blocked_apostrophe(self):
++        """File has ', old_string and new_string both have \\' — classic
++        tool-call drift. Guard must block with a helpful error instead of
++        writing \\' literals into source code."""
++        content = "x = \"hello there\"\n"
++        # Simulate transport-corrupted old_string and new_string where an
++        # apostrophe-like context got prefixed with a backslash. The content
++        # itself has no apostrophe, but both strings do — matching via
++        # whitespace/anchor strategies would otherwise succeed.
++        old_string = "x = \"hello there\" # don\\'t edit\n"
++        new_string = "x = \"hi there\" # don\\'t edit\n"
++        # This particular pair won't match anything, so it exits via
++        # no-match path. Build a case where a non-exact strategy DOES match.
++        content = "line\n    x = 1\nline"
++        old_string = "line\n  x = \\'a\\'\nline"
++        new_string = "line\n  x = \\'b\\'\nline"
++        new, count, strategy, err = fuzzy_find_and_replace(content, old_string, new_string)
++        assert count == 0
++        assert err is not None and "Escape-drift" in err
++        assert "backslash" in err.lower()
++        assert new == content  # file untouched
++
++    def test_drift_blocked_double_quote(self):
++        """Same idea but with \\" drift instead of \\'."""
++        content = 'line\n    x = 1\nline'
++        old_string = 'line\n  x = \\"a\\"\nline'
++        new_string = 'line\n  x = \\"b\\"\nline'
++        new, count, strategy, err = fuzzy_find_and_replace(content, old_string, new_string)
++        assert count == 0
++        assert err is not None and "Escape-drift" in err
++
++    def test_drift_allowed_when_file_genuinely_has_backslash_escapes(self):
++        """If the file already contains \\' (e.g. inside an existing escaped
++        string), the model is legitimately preserving it. Guard must NOT
++        fire."""
++        content = "line\n  x = \\'a\\'\nline"
++        old_string = "line\n  x = \\'a\\'\nline"
++        new_string = "line\n  x = \\'b\\'\nline"
++        new, count, strategy, err = fuzzy_find_and_replace(content, old_string, new_string)
++        assert err is None
++        assert count == 1
++        assert "\\'b\\'" in new
++
++    def test_drift_allowed_on_exact_match(self):
++        """Exact matches bypass the drift guard entirely — if the file
++        really contains the exact bytes old_string specified, it's not
++        drift."""
++        content = "hello \\'world\\'"
++        new, count, strategy, err = fuzzy_find_and_replace(
++            content, "hello \\'world\\'", "hello \\'there\\'"
++        )
++        assert err is None
++        assert count == 1
++        assert strategy == "exact"
++
++    def test_drift_allowed_when_adding_escaped_strings(self):
++        """Model is adding new content with \\' that wasn't in the original.
++        old_string has no \\', so guard doesn't fire."""
++        content = "line1\nline2\nline3"
++        old_string = "line1\nline2\nline3"
++        new_string = "line1\nprint(\\'added\\')\nline2\nline3"
++        new, count, strategy, err = fuzzy_find_and_replace(content, old_string, new_string)
++        assert err is None
++        assert count == 1
++        assert "\\'added\\'" in new
++
++    def test_no_drift_check_when_new_string_lacks_suspect_chars(self):
++        """Fast-path: if new_string has no \\' or \\", guard must not
++        fire even on fuzzy match."""
++        content = "def foo():\n    pass"  # extra space ignored by line_trimmed
++        old_string = "def foo():\n  pass"
++        new_string = "def bar():\n  return 1"
++        new, count, strategy, err = fuzzy_find_and_replace(content, old_string, new_string)
++        assert err is None
++        assert count == 1
+diff --git a/tools/file_operations.py b/tools/file_operations.py
+index 4550e9a2..8c3897bb 100644
+--- a/tools/file_operations.py
++++ b/tools/file_operations.py
+@@ -794,7 +794,24 @@ class ShellFileOperations(FileOperations):
+         write_result = self.write_file(path, new_content)
+         if write_result.error:
+             return PatchResult(error=f"Failed to write changes: {write_result.error}")
+-        
++
++        # Post-write verification — re-read the file and confirm the bytes we
++        # intended to write actually landed. Catches silent persistence
++        # failures (backend FS oddities, race with another task, truncated
++        # pipe, etc.) that would otherwise return success-with-diff while the
++        # file is unchanged on disk.
++        verify_cmd = f"cat {self._escape_shell_arg(path)} 2>/dev/null"
++        verify_result = self._exec(verify_cmd)
++        if verify_result.exit_code != 0:
++            return PatchResult(error=f"Post-write verification failed: could not re-read {path}")
++        if verify_result.stdout != new_content:
++            return PatchResult(error=(
++                f"Post-write verification failed for {path}: on-disk content "
++                f"differs from intended write "
++                f"(wrote {len(new_content)} chars, read back {len(verify_result.stdout)}). "
++                "The patch did not persist. Re-read the file and try again."
++            ))
++
+         # Generate diff
+         diff = self._unified_diff(content, new_content, path)
+         
+diff --git a/tools/fuzzy_match.py b/tools/fuzzy_match.py
+index 84833e0d..a9dc4272 100644
+--- a/tools/fuzzy_match.py
++++ b/tools/fuzzy_match.py
+@@ -93,6 +93,21 @@ def fuzzy_find_and_replace(content: str, old_string: str, new_string: str,
+                     f"Provide more context to make it unique, or use replace_all=True."
+                 )
+ 
++            # Escape-drift guard: when the matched strategy is NOT `exact`,
++            # we matched via some form of normalization. If new_string
++            # contains shell/JSON-style escape sequences (\' or \") that
++            # would be written literally into the file but the matched
++            # region of the file has no such sequences, this is almost
++            # certainly tool-call serialization drift — the model typed
++            # an apostrophe/quote and the transport added a stray
++            # backslash. Writing new_string as-is would corrupt the file.
++            # Block with a helpful error so the model re-reads and retries
++            # instead of the caller silently persisting garbage (or not).
++            if strategy_name != "exact":
++                drift_err = _detect_escape_drift(content, matches, old_string, new_string)
++                if drift_err:
++                    return content, 0, None, drift_err
++
+             # Perform replacement
+             new_content = _apply_replacements(content, matches, new_string)
+             return new_content, len(matches), strategy_name, None
+@@ -101,6 +116,46 @@ def fuzzy_find_and_replace(content: str, old_string: str, new_string: str,
+     return content, 0, None, "Could not find a match for old_string in the file"
+ 
+ 
++def _detect_escape_drift(content: str, matches: List[Tuple[int, int]],
++                         old_string: str, new_string: str) -> Optional[str]:
++    """Detect tool-call escape-drift artifacts in new_string.
++
++    Looks for ``\\'`` or ``\\"`` sequences that are present in both
++    old_string and new_string (i.e. the model copy-pasted them as "context"
++    it intended to preserve) but don't exist in the matched region of the
++    file. That pattern indicates the transport layer inserted spurious
++    shell-style escapes around apostrophes or quotes — writing new_string
++    verbatim would literally insert ``\\'`` into source code.
++
++    Returns an error string if drift is detected, None otherwise.
++    """
++    # Cheap pre-check: bail out unless new_string actually contains a
++    # suspect escape sequence. This keeps the guard free for all the
++    # common, correct cases.
++    if "\\'" not in new_string and '\\"' not in new_string:
++        return None
++
++    # Aggregate matched regions of the file — that's what new_string will
++    # replace. If the suspect escapes are present there already, the
++    # model is genuinely preserving them (valid for some languages /
++    # escaped strings); accept the patch.
++    matched_regions = "".join(content[start:end] for start, end in matches)
++
++    for suspect in ("\\'", '\\"'):
++        if suspect in new_string and suspect in old_string and suspect not in matched_regions:
++            plain = suspect[1]  # "'" or '"'
++            return (
++                f"Escape-drift detected: old_string and new_string contain "
++                f"the literal sequence {suspect!r} but the matched region of "
++                f"the file does not. This is almost always a tool-call "
++                f"serialization artifact where an apostrophe or quote got "
++                f"prefixed with a spurious backslash. Re-read the file with "
++                f"read_file and pass old_string/new_string without "
++                f"backslash-escaping {plain!r} characters."
++            )
++    return None
++
++
+ def _apply_replacements(content: str, matches: List[Tuple[int, int]], new_string: str) -> str:
+     """
+     Apply replacements at the given positions.
