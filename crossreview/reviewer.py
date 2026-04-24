@@ -127,7 +127,12 @@ class AnthropicReviewerBackend:
 
 
 def resolve_reviewer_backend(config: ReviewerConfig) -> ReviewerBackend:
-    """Resolve the first standalone backend for a provider."""
+    """Resolve the first standalone backend for a provider.
+
+    Host-integrated mode does NOT go through this function. It uses
+    ``crossreview render-prompt`` + ``crossreview ingest`` instead,
+    bypassing the standalone reviewer backend entirely.
+    """
     provider = config.provider.lower()
     if provider == "anthropic":
         return AnthropicReviewerBackend()

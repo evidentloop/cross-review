@@ -171,10 +171,10 @@ Reviewer 后端有两种模式：
 
 | 模式 | 说明 | 依赖 |
 |------|------|------|
-| **Host-integrated** *（计划中）* | 宿主提供独立 reviewer backend；CrossReview 只消费结果 | CrossReview 侧无额外 SDK |
+| **Host-integrated** *（计划中）* | 规划中的路径：宿主在隔离上下文（新会话 / sub-agent）中渲染 reviewer prompt，再通过 `render-prompt + ingest` 流程把原始分析文本回传给 normalizer + adjudicator | CrossReview 侧无额外 SDK |
 | **Standalone** *（已实现）* | CLI 直接调 LLM API | `crossreview[anthropic]` + reviewer config + API key |
 
-Host-integrated 是计划中的默认产品路径。当前 `main` 分支实际只提供 standalone verify。
+Host-integrated 是计划中的默认产品路径。宿主不需要实现 Python `ReviewerBackend`；预期集成方式是 `render-prompt + ingest`，由宿主负责在 fresh context 中执行 canonical prompt，再把原始分析文本回传。当前 `main` 分支实际只提供 standalone verify。
 
 ## 命令
 

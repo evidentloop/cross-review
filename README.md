@@ -171,10 +171,10 @@ Two reviewer backend modes:
 
 | Mode | Description | Dependency |
 |------|-------------|------------|
-| **Host-integrated** *(planned)* | Host provides an isolated reviewer backend; CrossReview only consumes the result | No extra SDK on the CrossReview side |
+| **Host-integrated** *(planned)* | Planned path: the host renders the reviewer prompt in an isolated context (fresh session / sub-agent), then feeds raw analysis back to CrossReview's normalizer + adjudicator through a `render-prompt + ingest` flow | No extra SDK on the CrossReview side |
 | **Standalone** *(implemented)* | CLI calls the LLM API directly | `crossreview[anthropic]` + reviewer config + API key |
 
-Host-integrated is the planned default product path. The current main branch ships standalone verify only.
+Host-integrated is the planned default product path. The host does NOT need to implement a Python `ReviewerBackend`; the intended integration path is `render-prompt + ingest`, with the host responsible for executing the canonical prompt in a fresh context and feeding raw analysis back. The current main branch ships standalone verify only.
 
 ## Commands
 

@@ -571,12 +571,12 @@ ReviewResult:
   
   # Reviewer 元信息
   reviewer:
-    type: "fresh_llm"
-    model: string
+    type: "fresh_llm"            # host-integrated 同样使用 fresh_llm；区别在执行路径，不在 reviewer 类型
+    model: string                # 宿主不知道自身 model 时填 "host_unknown"
     session_isolated: bool
     failure_reason: ReviewerFailureReason | null
     raw_analysis: string | null     # reviewer 原始自由分析文本（审计证据）
-    prompt_source: string | null     # prompt 来源；内置产品 prompt 记录为 "product"
+    prompt_source: string | null     # prompt 来源："product" = canonical product prompt；宿主集成若使用同一 prompt，仍应记录为 "product"
     prompt_version: string | null    # prompt 版本；用于区分不可复现实验口径与产品口径
     latency_sec: float | null       # 模型调用耗时（秒）
     input_tokens: int | null        # LLM 输入 token 数
@@ -825,10 +825,17 @@ cli_adapter:
     model: claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY   # 指向环境变量名，不直接存 key
 
-host_adapter (如 Sopify):
+host_adapter (如 Sopify / Copilot CLI / Claude Code):
   默认传宿主当前在用的模型 → same-model fresh session
   语义: context isolation 是价值来源，不需要换模型
   用户没有显式指定跨模型 → 自动传当前模型
+  集成方式 (预期 CLI 形态，尚未实现): render-prompt → 宿主在隔离上下文执行 → ingest 回传
+    宿主不需要实现 Python ReviewerBackend Protocol
+    crossreview render-prompt --pack pack.json → rendered-prompt.md
+    crossreview ingest --raw-analysis raw-output.md --pack pack.json
+      --model <host-model> [reviewer metadata] → ReviewResult JSON
+    ingest 复用 normalizer + adjudicator，不含 reviewer 调用
+    如果宿主不知道自身 model 名，ingest 接受 --model host_unknown
 ```
 
 > **设计理由**：CrossReview 的核心假设是 context isolation 提供价值，不是 model diversity。
@@ -1123,8 +1130,8 @@ diagnostic_metrics:
   pack_completeness              # 运行时启发式结构完整度（不和 manual baseline 对比）
   locatability_distribution      # exact / file_only / none 占比
   speculative_ratio              # speculative finding 占比
-  prompt_source                  # reviewer prompt 来源（例如 product）
-  prompt_version                 # reviewer prompt 版本（例如 v0.1）
+  prompt_source                  # reviewer prompt 来源（来自 ReviewerMeta.prompt_source；例如 product）
+  prompt_version                 # reviewer prompt 版本（来自 ReviewerMeta.prompt_version；例如 v0.1）
   evidence_related_file_rate     # evidence_related_file == true 的 finding 占比
   triage_time                    # 端到端时间（含人工筛选）
   model_latency_sec              # 模型调用耗时（秒），不含 evidence 收集和 pack 构建

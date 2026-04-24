@@ -171,7 +171,7 @@ class QualityMetrics:
 @dataclass
 class ReviewerMeta:
     """Reviewer metadata. v0-scope.md §7 ReviewResult.reviewer."""
-    type: Literal["fresh_llm"] = "fresh_llm"
+    type: Literal["fresh_llm"] = "fresh_llm"  # host-integrated reviewers also use fresh_llm; execution path differs, not reviewer type
     model: str = ""
     session_isolated: bool = True
     failure_reason: ReviewerFailureReason | None = None

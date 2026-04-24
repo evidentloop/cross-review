@@ -27,6 +27,8 @@ Prompt Lab 目前有两条 prompt 入口：
 - `python run.py --render-only ...` 渲染 `prompt-lab/prompt-template.md`，用于手动粘贴实验。
 - `python run.py --api-only ...` 调用产品 verify 管道，渲染 `crossreview/core/prompt.py`；产出的 `ReviewResult.reviewer` 会记录 `prompt_source` 与 `prompt_version`。
 
+Host-integrated（宿主集成）模式始终使用产品 prompt（`crossreview/core/prompt.py`），通过 `crossreview render-prompt` 获取。Prompt Lab template 仅用于手动实验迭代，不用于 host-integrated 或 eval baseline。
+
 除非 summary 明确标注 prompt source/version，否则不要跨入口混用 adjudication。历史 Round 3 输出标注为 `template: v0.3`，但对应模板没有入库，因此不能作为可复现的 product baseline。
 
 ```bash
