@@ -1,6 +1,33 @@
 # Fixtures
 
-v0 eval harness 使用的 diff fixture 集合。
+v0 eval harness 使用的 fixture 集合。
+
+## 数据存放
+
+**Fixture 数据存放在 `eval-data` 分支**，不在 `main` 分支。
+
+```bash
+# 获取 fixture 数据
+git checkout eval-data -- fixtures/
+
+# 或者切到 eval-data 分支
+git switch eval-data
+```
+
+### 为什么分离？
+
+Fixture 包含来自其他项目（hermes-agent, helloagents, graphify, ai-daily-brief）的真实 diff 和方案包数据。分离的原因：
+
+1. **隐私边界**：cross-review 工具代码可公开，eval 数据（含其他项目代码片段）保持独立
+2. **受众不同**：使用 cross-review 的人不需要看 eval 数据；贡献 eval 的人才需要
+3. **后续可拆**：如需更严格隔离，从 `eval-data` 分支直接拆为独立 private repo
+
+### 分支内容
+
+| 分支 | 内容 |
+|------|------|
+| `main` | 工具代码 + 此 README |
+| `eval-data` | fixtures/001-020 (code_diff) + fixtures/plan-preview (v1+) + migration scripts |
 
 ## 格式
 
@@ -8,14 +35,15 @@ v0 eval harness 使用的 diff fixture 集合。
 
 ```
 fixtures/
-├── 001-auth-refresh/
+├── 001-hermes-subshell-leak/
 │   ├── fixture.yaml            # fixture_id + pool (external|self_hosting)
 │   ├── pack.json               # ReviewPack
 │   ├── review-result.json      # 运行产出的 ReviewResult
 │   ├── manual-findings.yaml    # 手工 cross-review baseline（recall denominator）
 │   └── auto-adjudications.yaml # 对自动 finding 的人工判定（precision numerator）
-└── 002-cache-layer/
-    └── ...
+├── ...
+└── plan-preview/               # v1+ plan artifact 验证预备 case
+    └── 001-feishu-webhook/
 ```
 
 `python -m crossreview_eval --fixtures ./fixtures/` 只消费上述 5 个文件，不负责触发 reviewer 调用。
