@@ -385,6 +385,178 @@ class TestVerifyCLI:
         assert rc == 1
         assert "missing" in capsys.readouterr().err
 
+    def test_verify_diff_mode_defaults_to_human(self, capsys):
+        """verify --diff uses human format by default."""
+        with (
+            _patch_git()[0],
+            _patch_git()[1],
+            patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
+            patch("crossreview.verify.resolve_reviewer_backend") as resolve_backend,
+        ):
+            resolve_cfg.return_value = type(
+                "Cfg", (), {"provider": "anthropic", "model": "claude-test", "api_key_env": "KEY"}
+            )()
+            backend = resolve_backend.return_value
+            backend.review.return_value = type(
+                "Resp",
+                (),
+                {
+                    "raw_analysis": "## Section 1: Findings\n\n(none)\n\n## Section 2: Observations\n\n(none)\n",
+                    "model": "claude-test",
+                    "latency_sec": 0.5,
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                },
+            )()
+            rc = main(["verify", "--diff", "HEAD~1"])
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        # human format: starts with "CrossReview", not a JSON object
+        assert out.startswith("CrossReview")
+        assert "{" not in out.splitlines()[0]
+
+    def test_verify_diff_mode_explicit_json(self, capsys):
+        """verify --diff --format json produces JSON output."""
+        with (
+            _patch_git()[0],
+            _patch_git()[1],
+            patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
+            patch("crossreview.verify.resolve_reviewer_backend") as resolve_backend,
+        ):
+            resolve_cfg.return_value = type(
+                "Cfg", (), {"provider": "anthropic", "model": "claude-test", "api_key_env": "KEY"}
+            )()
+            backend = resolve_backend.return_value
+            backend.review.return_value = type(
+                "Resp",
+                (),
+                {
+                    "raw_analysis": "## Section 1: Findings\n\n(none)\n\n## Section 2: Observations\n\n(none)\n",
+                    "model": "claude-test",
+                    "latency_sec": 0.5,
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                },
+            )()
+            rc = main(["verify", "--diff", "HEAD~1", "--format", "json"])
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        parsed = json.loads(out)
+        assert parsed["review_status"] == "complete"
+
+    def test_verify_diff_mode_with_intent(self, capsys):
+        """verify --diff passes intent to the assembled pack."""
+        with (
+            _patch_git()[0],
+            _patch_git()[1],
+            patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
+            patch("crossreview.verify.resolve_reviewer_backend") as resolve_backend,
+        ):
+            resolve_cfg.return_value = type(
+                "Cfg", (), {"provider": "anthropic", "model": "claude-test", "api_key_env": "KEY"}
+            )()
+            backend = resolve_backend.return_value
+            backend.review.return_value = type(
+                "Resp",
+                (),
+                {
+                    "raw_analysis": "## Section 1: Findings\n\n(none)\n\n## Section 2: Observations\n\n(none)\n",
+                    "model": "claude-test",
+                    "latency_sec": 0.5,
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                },
+            )()
+            rc = main(["verify", "--diff", "HEAD~1", "--intent", "fix auth", "--format", "json"])
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        parsed = json.loads(out)
+        assert parsed["review_status"] == "complete"
+        # Verify intent was passed through to the reviewer backend
+        backend.review.assert_called_once()
+        pack_arg = backend.review.call_args[0][0]
+        assert pack_arg.intent == "fix auth"
+
+    def test_verify_diff_pack_mutually_exclusive(self, capsys, tmp_path):
+        """--diff and --pack cannot be used together."""
+        pack_path = self._write_pack(tmp_path)
+        try:
+            rc = main(["verify", "--diff", "HEAD~1", "--pack", str(pack_path)])
+        except SystemExit as e:
+            rc = e.code
+        assert rc != 0
+
+    def test_verify_diff_empty_diff_error(self, capsys):
+        """verify --diff with empty diff produces error."""
+        with (
+            patch("crossreview.cli.diff_from_git", return_value="   "),
+            patch("crossreview.cli.changed_files_from_git", return_value=[]),
+        ):
+            rc = main(["verify", "--diff", "HEAD~1"])
+        assert rc == 1
+        assert "empty" in capsys.readouterr().err
+
+    def test_verify_pack_mode_defaults_to_json(self, capsys, tmp_path):
+        """verify --pack still defaults to json (backward compat)."""
+        pack_path = self._write_pack(tmp_path, intent="check me")
+        with (
+            patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
+            patch("crossreview.verify.resolve_reviewer_backend") as resolve_backend,
+        ):
+            resolve_cfg.return_value = type(
+                "Cfg", (), {"provider": "anthropic", "model": "claude-test", "api_key_env": "KEY"}
+            )()
+            backend = resolve_backend.return_value
+            backend.review.return_value = type(
+                "Resp",
+                (),
+                {
+                    "raw_analysis": "## Section 1: Findings\n\n(none)\n\n## Section 2: Observations\n\n(none)\n",
+                    "model": "claude-test",
+                    "latency_sec": 0.5,
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                },
+            )()
+            rc = main(["verify", "--pack", str(pack_path)])
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        parsed = json.loads(out)
+        assert parsed["schema_version"] == "0.1-alpha"
+
+    def test_verify_pack_mode_warns_on_diff_only_flags(self, capsys, tmp_path):
+        """verify --pack with --intent should warn about ignored flags."""
+        pack_path = self._write_pack(tmp_path, intent="check me")
+        with (
+            patch("crossreview.cli.resolve_reviewer_config") as resolve_cfg,
+            patch("crossreview.verify.resolve_reviewer_backend") as resolve_backend,
+        ):
+            resolve_cfg.return_value = type(
+                "Cfg", (), {"provider": "anthropic", "model": "claude-test", "api_key_env": "KEY"}
+            )()
+            backend = resolve_backend.return_value
+            backend.review.return_value = type(
+                "Resp",
+                (),
+                {
+                    "raw_analysis": "## Section 1: Findings\n\n(none)\n\n## Section 2: Observations\n\n(none)\n",
+                    "model": "claude-test",
+                    "latency_sec": 0.5,
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                },
+            )()
+            rc = main(["verify", "--pack", str(pack_path), "--intent", "ignored intent"])
+
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "warning" in err
+        assert "ignored" in err
+
 
 # ---------------------------------------------------------------------------
 # No subcommand

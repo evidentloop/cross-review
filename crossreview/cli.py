@@ -5,7 +5,9 @@ Usage::
     crossreview pack --diff HEAD~1 > pack.json
     crossreview pack --diff HEAD~1 --intent "fix auth" --focus auth > pack.json
     crossreview pack --diff HEAD~1 --task ./task.md --context ./plan.md > pack.json
-    crossreview verify --pack pack.json
+    crossreview verify --diff HEAD~1                               # one-stop: pack + verify (default: --format human)
+    crossreview verify --diff HEAD~1 --intent "fix auth"
+    crossreview verify --pack pack.json                            # verify pre-built pack (default: --format json)
     crossreview render-prompt --pack pack.json > prompt.md
     crossreview ingest --raw-analysis raw.md --pack pack.json --model claude-sonnet-4-20250514
 """
@@ -35,6 +37,7 @@ from .pack import (
 )
 from .verify import run_verify_pack
 from .schema import (
+    ReviewPack,
     review_pack_from_dict,
     review_result_to_json,
     validate_review_pack,
@@ -85,23 +88,41 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Extra context file path (repeatable).",
     )
 
-    # --- verify (stub) ---
+    # --- verify ---
     verify_p = sub.add_parser(
         "verify",
-        help="Review a ReviewPack and emit ReviewResult JSON.",
+        help="Review a change and emit ReviewResult. Accepts --pack (pre-built) or --diff (one-stop).",
     )
-    verify_p.add_argument(
+    _mode = verify_p.add_mutually_exclusive_group(required=True)
+    _mode.add_argument(
         "--pack",
-        required=True,
+        default=None,
         metavar="FILE",
         help="Path to a ReviewPack JSON file.",
+    )
+    _mode.add_argument(
+        "--diff",
+        default=None,
+        metavar="REF",
+        help="Git ref for diff base (e.g. HEAD~1, abc123, main..feat). Assembles a ReviewPack inline.",
+    )
+    # pack flags (only meaningful with --diff; ignored with --pack)
+    verify_p.add_argument("--intent", default=None, help="Task intent string (--diff mode).")
+    verify_p.add_argument("--task", default=None, metavar="FILE", help="Task description file (--diff mode).")
+    verify_p.add_argument("--focus", action="append", default=None, help="Focus area, repeatable (--diff mode).")
+    verify_p.add_argument(
+        "--context",
+        action="append",
+        default=None,
+        metavar="FILE",
+        help="Extra context file, repeatable (--diff mode).",
     )
     verify_p.add_argument(
         "--format",
         choices=["json", "human"],
-        default="json",
+        default=None,
         dest="output_format",
-        help="Output format (default: json). Use 'human' for terminal-friendly output.",
+        help="Output format. Defaults to 'human' with --diff, 'json' with --pack.",
     )
     verify_p.add_argument("--model", default=None, help="Override reviewer model.")
     verify_p.add_argument("--provider", default=None, help="Override reviewer provider.")
@@ -168,38 +189,39 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cmd_pack(args: argparse.Namespace) -> int:
-    """Execute ``crossreview pack``."""
+def _build_pack_from_diff(args: argparse.Namespace) -> ReviewPack | None:
+    """Assemble a ReviewPack from ``--diff`` args. Returns the pack or None on error.
 
-    # 1. Obtain diff
+    Note: ``--intent``, ``--task``, ``--focus``, and ``--context`` are pack flags
+    shared by the ``pack`` subcommand and ``verify --diff`` mode; they are ignored
+    when ``verify --pack`` is used.
+    """
     try:
         diff = diff_from_git(args.diff)
     except GitDiffError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return None
 
     if not diff.strip():
         print("error: git diff produced empty output — nothing to pack.", file=sys.stderr)
-        return 1
+        return None
 
-    # 2. Get changed files via git (NUL-delimited, handles special-char paths)
     try:
         changed_files = changed_files_from_git(args.diff)
     except GitDiffError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return None
 
-    # 3. Read optional files
     task_content: str | None = None
     if args.task:
         try:
             task_content = read_task_file(args.task)
         except OSError as exc:
             print(f"error: cannot read task file: {exc}", file=sys.stderr)
-            return 1
+            return None
         except UnicodeDecodeError as exc:
             print(f"error: task file is not valid UTF-8: {exc}", file=sys.stderr)
-            return 1
+            return None
 
     context_files = None
     if args.context:
@@ -207,14 +229,13 @@ def _cmd_pack(args: argparse.Namespace) -> int:
             context_files = read_context_files(args.context)
         except OSError as exc:
             print(f"error: cannot read context file: {exc}", file=sys.stderr)
-            return 1
+            return None
         except UnicodeDecodeError as exc:
             print(f"error: context file is not valid UTF-8: {exc}", file=sys.stderr)
-            return 1
+            return None
 
-    # 4. Assemble
     try:
-        pack = assemble_pack(
+        return assemble_pack(
             diff,
             changed_files=changed_files,
             intent=args.intent,
@@ -224,9 +245,15 @@ def _cmd_pack(args: argparse.Namespace) -> int:
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return None
+
+
+def _cmd_pack(args: argparse.Namespace) -> int:
+    """Execute ``crossreview pack``."""
+    pack = _build_pack_from_diff(args)
+    if pack is None:
         return 1
 
-    # 5. Diagnostic to stderr
     completeness = compute_pack_completeness(pack)
     n_files = len(pack.changed_files)
     print(
@@ -235,7 +262,6 @@ def _cmd_pack(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
 
-    # 6. JSON to stdout
     print(pack_to_json(pack))
     return 0
 
@@ -265,10 +291,31 @@ def _load_pack(path: str):
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
-    """Execute ``crossreview verify --pack pack.json``."""
-    pack = _load_pack(args.pack)
-    if pack is None:
-        return 1
+    """Execute ``crossreview verify`` (--pack or --diff mode)."""
+    # Resolve output format: --diff defaults to human, --pack defaults to json
+    output_format = args.output_format or ("human" if args.diff else "json")
+
+    # Build pack
+    if args.diff:
+        pack = _build_pack_from_diff(args)
+        if pack is None:
+            return 1
+        completeness = compute_pack_completeness(pack)
+        print(
+            f"crossreview pack: {len(pack.changed_files)} file(s), completeness={completeness:.2f}, "
+            f"artifact={pack.artifact_fingerprint[:12]}",
+            file=sys.stderr,
+        )
+    else:
+        _diff_only = [f for f in ("intent", "task", "focus", "context") if getattr(args, f, None)]
+        if _diff_only:
+            print(
+                f"warning: --{'/--'.join(_diff_only)} ignored in --pack mode (only used with --diff)",
+                file=sys.stderr,
+            )
+        pack = _load_pack(args.pack)
+        if pack is None:
+            return 1
 
     violations = validate_review_pack(pack)
     if violations:
@@ -296,7 +343,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print(f"error: internal invalid ReviewResult: {', '.join(violations)}", file=sys.stderr)
         return 1
 
-    if args.output_format == "human":
+    if output_format == "human":
         print(format_human(result, pack))
     else:
         print(review_result_to_json(result))

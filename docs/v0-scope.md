@@ -332,8 +332,8 @@ crossreview pack --diff HEAD~1 --intent "修复 auth 逻辑" --focus auth > pack
 # 带额外 context
 crossreview pack --diff HEAD~1 --intent "实现缓存层" --context ./plan.md > pack.json
 
-# 带 deterministic evidence（lint/test 输出）
-crossreview pack --diff HEAD~1 --evidence-cmd "npm test" --evidence-cmd "npm run lint" > pack.json
+# 带 deterministic evidence（lint/test 输出）— v0.5+ future, 当前未实现
+# crossreview pack --diff HEAD~1 --evidence-cmd "npm test" --evidence-cmd "npm run lint" > pack.json
 ```
 
 **pack 是 v0 一等能力，不是调试手段。** 它让用户可以检查自动打包的内容是否和手工 copy-paste 一致。
@@ -360,8 +360,8 @@ crossreview verify --pack pack.json
 crossreview verify --diff HEAD~1 --format json
 crossreview verify --diff HEAD~1 --format human  # 默认
 
-# 带 evidence
-crossreview verify --diff HEAD~1 --evidence-cmd "npm test" --intent "修复登录流程"
+# 带 evidence — v0.5+ future, 当前未实现
+# crossreview verify --diff HEAD~1 --evidence-cmd "npm test" --intent "修复登录流程"
 ```
 
 ### 输出示例（human-readable）
