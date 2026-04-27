@@ -59,7 +59,7 @@ crossreview pack --diff HEAD~1 --intent "fix auth token refresh" > pack.json
 crossreview verify --pack pack.json
 ```
 
-`crossreview verify` outputs `ReviewResult` JSON to stdout:
+`crossreview verify` outputs `ReviewResult` JSON to stdout (default), or human-readable text with `--format human`:
 
 ```jsonc
 {
@@ -210,6 +210,7 @@ crossreview verify --pack pack.json --model claude-sonnet-4-20250514 --provider 
 | Flag | Description |
 |------|-------------|
 | `--pack FILE` | Path to ReviewPack JSON |
+| `--format FORMAT` | Output format: `json` (default) or `human` |
 | `--model TEXT` | Override reviewer model |
 | `--provider TEXT` | Override provider (currently `anthropic` only) |
 | `--api-key-env VAR` | Override API key env variable name |
@@ -235,13 +236,14 @@ crossreview ingest --raw-analysis raw.md --pack pack.json --model claude-sonnet-
 crossreview ingest --raw-analysis - --pack pack.json --model host_unknown --prompt-source product --prompt-version v0.1
 ```
 
-Takes raw analysis text from a host-integrated review session and produces a standard ReviewResult JSON via normalizer + adjudicator. No LLM call, no API key needed.
+Takes raw analysis text from a host-integrated review session and produces a standard ReviewResult via normalizer + adjudicator. No LLM call, no API key needed. Outputs JSON by default; use `--format human` for terminal-friendly output.
 
 | Flag | Description |
 |------|-------------|
 | `--raw-analysis FILE` | Raw analysis file path; `-` for stdin |
 | `--pack FILE` | Original ReviewPack JSON |
 | `--model TEXT` | Host model name (`host_unknown` if unknown) |
+| `--format FORMAT` | Output format: `json` (default) or `human` |
 | `--prompt-source TEXT` | Prompt source identifier (optional) |
 | `--prompt-version TEXT` | Prompt version identifier (optional) |
 | `--latency-sec FLOAT` | Host-measured LLM latency (optional) |
@@ -263,7 +265,7 @@ Takes raw analysis text from a host-integrated review session and produces a sta
 | Ingest CLI | ✅ Done | `crossreview ingest --raw-analysis --pack --model` (host-integrated back half) |
 | Evidence Collector | 🔜 Next | ReviewPack.evidence path exists, empty evidence works |
 | Eval Harness | 🔜 Planned | Release gate validation with fixtures |
-| Human-readable Output | 🔜 Next | `--format human` |
+| Human-readable Output | ✅ Done | `--format human` on verify/ingest |
 | One-stop Verify | 🔜 Next | `crossreview verify --diff` (pack + review in one step) |
 
 ## v0 Scope

@@ -59,7 +59,7 @@ crossreview pack --diff HEAD~1 --intent "fix auth token refresh" > pack.json
 crossreview verify --pack pack.json
 ```
 
-`crossreview verify` 输出 `ReviewResult` JSON 到 stdout：
+`crossreview verify` 输出 `ReviewResult` JSON 到 stdout（默认），或用 `--format human` 获得终端可读格式：
 
 ```jsonc
 {
@@ -210,6 +210,7 @@ crossreview verify --pack pack.json --model claude-sonnet-4-20250514 --provider 
 | 参数 | 说明 |
 |------|------|
 | `--pack FILE` | ReviewPack JSON 文件路径 |
+| `--format FORMAT` | 输出格式：`json`（默认）或 `human` |
 | `--model TEXT` | 覆盖 reviewer 模型 |
 | `--provider TEXT` | 覆盖 provider（当前仅 `anthropic`） |
 | `--api-key-env VAR` | 覆盖 API key 环境变量名 |
@@ -235,13 +236,14 @@ crossreview ingest --raw-analysis raw.md --pack pack.json --model claude-sonnet-
 crossreview ingest --raw-analysis - --pack pack.json --model host_unknown --prompt-source product --prompt-version v0.1
 ```
 
-接收宿主在隔离上下文中执行后的 raw analysis 文本，经 normalizer + adjudicator 生成标准 ReviewResult JSON。这是 host-integrated 路径的"后半段"——不调用 LLM，不需要 API key。
+接收宿主在隔离上下文中执行后的 raw analysis 文本，经 normalizer + adjudicator 生成标准 ReviewResult。默认输出 JSON；用 `--format human` 获得终端可读格式。不调用 LLM，不需要 API key。
 
 | 参数 | 说明 |
 |------|------|
 | `--raw-analysis FILE` | raw analysis 文件路径；`-` 读 stdin |
 | `--pack FILE` | 原始 ReviewPack JSON |
 | `--model TEXT` | 宿主使用的模型名（不知道时传 `host_unknown`） |
+| `--format FORMAT` | 输出格式：`json`（默认）或 `human` |
 | `--prompt-source TEXT` | prompt 来源标识（可选） |
 | `--prompt-version TEXT` | prompt 版本标识（可选） |
 | `--latency-sec FLOAT` | 宿主侧 LLM 调用耗时（可选） |
@@ -263,7 +265,7 @@ crossreview ingest --raw-analysis - --pack pack.json --model host_unknown --prom
 | Ingest CLI | ✅ 完成 | `crossreview ingest --raw-analysis --pack --model`（host-integrated 后半段） |
 | Evidence Collector | 🔜 待做 | ReviewPack.evidence 通路已有，空 evidence 可正常运行 |
 | Eval Harness | 🔜 规划中 | 基于 fixture 的 release gate 验证 |
-| 可读输出 | 🔜 待做 | `--format human` |
+| 可读输出 | ✅ 完成 | verify/ingest 支持 `--format human` |
 | 一站式 Verify | 🔜 待做 | `crossreview verify --diff`（pack + review 一步完成） |
 
 ## v0 边界

@@ -21,6 +21,7 @@ from .core.prompt import (
     get_default_reviewer_template,
     render_reviewer_prompt,
 )
+from .formatter import format_human
 from .ingest import run_ingest
 from .pack import (
     GitDiffError,
@@ -95,6 +96,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="Path to a ReviewPack JSON file.",
     )
+    verify_p.add_argument(
+        "--format",
+        choices=["json", "human"],
+        default="json",
+        dest="output_format",
+        help="Output format (default: json). Use 'human' for terminal-friendly output.",
+    )
     verify_p.add_argument("--model", default=None, help="Override reviewer model.")
     verify_p.add_argument("--provider", default=None, help="Override reviewer provider.")
     verify_p.add_argument(
@@ -149,6 +157,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest_p.add_argument("--latency-sec", type=float, default=None, help="Host-measured LLM latency in seconds.")
     ingest_p.add_argument("--input-tokens", type=int, default=None, help="Host-reported input token count.")
     ingest_p.add_argument("--output-tokens", type=int, default=None, help="Host-reported output token count.")
+    ingest_p.add_argument(
+        "--format",
+        choices=["json", "human"],
+        default="json",
+        dest="output_format",
+        help="Output format (default: json). Use 'human' for terminal-friendly output.",
+    )
 
     return parser
 
@@ -281,7 +296,10 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print(f"error: internal invalid ReviewResult: {', '.join(violations)}", file=sys.stderr)
         return 1
 
-    print(review_result_to_json(result))
+    if args.output_format == "human":
+        print(format_human(result, pack))
+    else:
+        print(review_result_to_json(result))
     print(
         f"crossreview verify: review_status={result.review_status.value}, "
         f"findings={len(result.findings)}, model={result.reviewer.model}",
@@ -369,7 +387,10 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         print(f"error: internal invalid ReviewResult: {', '.join(violations)}", file=sys.stderr)
         return 1
 
-    print(review_result_to_json(result))
+    if args.output_format == "human":
+        print(format_human(result, pack))
+    else:
+        print(review_result_to_json(result))
     print(
         f"crossreview ingest: review_status={result.review_status.value}, "
         f"findings={len(result.findings)}, model={result.reviewer.model}",
