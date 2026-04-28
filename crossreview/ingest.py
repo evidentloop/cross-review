@@ -16,6 +16,8 @@ from .schema import (
     ReviewPack,
     ReviewResult,
     ReviewStatus,
+    ReviewerMeta,
+    ResultBudget,
 )
 from .verify import build_review_result
 
@@ -59,24 +61,30 @@ def run_ingest(
         pack_completeness=pack_completeness,
         speculative_ratio=normalization.quality_metrics.speculative_ratio,
     )
-
-    return build_review_result(
-        pack=pack,
-        reviewer_model=model,
-        budget_status=BudgetStatus.COMPLETE,
-        files_reviewed=files_total,
-        files_total=files_total,
-        chars_consumed=len(pack.diff),
-        chars_limit=pack.budget.max_chars_total,
-        review_status=ReviewStatus.COMPLETE,
-        findings=normalization.findings,
-        raw_findings=normalization.raw_findings,
+    reviewer = ReviewerMeta(
+        model=model,
         raw_analysis=raw_analysis,
         prompt_source=prompt_source,
         prompt_version=prompt_version,
         latency_sec=latency_sec,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+    )
+    result_budget = ResultBudget(
+        status=BudgetStatus.COMPLETE,
+        files_reviewed=files_total,
+        files_total=files_total,
+        chars_consumed=len(pack.diff),
+        chars_limit=pack.budget.max_chars_total,
+    )
+
+    return build_review_result(
+        pack=pack,
+        reviewer=reviewer,
+        budget=result_budget,
+        review_status=ReviewStatus.COMPLETE,
+        findings=normalization.findings,
+        raw_findings=normalization.raw_findings,
         advisory_verdict=advisory_verdict,
         quality_metrics=normalization.quality_metrics,
     )

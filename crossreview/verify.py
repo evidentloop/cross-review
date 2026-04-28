@@ -15,9 +15,11 @@ from .reviewer import ReviewerBackend, ReviewerError, resolve_reviewer_backend
 from .schema import (
     AdvisoryVerdict,
     BudgetStatus,
+    Finding,
+    IntentCoverage,
+    QualityMetrics,
     ReviewPack,
     ReviewerConfig,
-    ReviewerFailureReason,
     ReviewerMeta,
     ResultBudget,
     ReviewResult,
@@ -30,57 +32,33 @@ from .schema import (
 def build_review_result(
     *,
     pack: ReviewPack,
-    reviewer_model: str,
-    budget_status: BudgetStatus,
-    files_reviewed: int,
-    files_total: int,
-    chars_consumed: int,
-    chars_limit: int | None,
+    reviewer: ReviewerMeta,
+    budget: ResultBudget,
     review_status: ReviewStatus,
-    raw_findings: list | None = None,
-    findings=None,
-    raw_analysis: str | None = None,
-    prompt_source: str | None = None,
-    prompt_version: str | None = None,
-    latency_sec: float | None = None,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
-    failure_reason: ReviewerFailureReason | None = None,
+    raw_findings: list[Finding] | None = None,
+    findings: list[Finding] | None = None,
     advisory_verdict: AdvisoryVerdict | None = None,
-    quality_metrics=None,
-    intent_coverage=None,
+    quality_metrics: QualityMetrics | None = None,
+    intent_coverage: IntentCoverage | None = None,
 ) -> ReviewResult:
+    resolved_raw_findings = raw_findings or []
+    resolved_findings = findings or []
     return ReviewResult(
         schema_version=SCHEMA_VERSION,
         artifact_fingerprint=pack.artifact_fingerprint,
         pack_fingerprint=pack.pack_fingerprint,
         review_status=review_status,
-        intent_coverage=intent_coverage or determine_intent_coverage(pack, findings or []),
-        raw_findings=raw_findings or [],
-        findings=findings or [],
+        intent_coverage=intent_coverage or determine_intent_coverage(pack, resolved_findings),
+        raw_findings=resolved_raw_findings,
+        findings=resolved_findings,
         evidence=list(pack.evidence or []),
         advisory_verdict=advisory_verdict or AdvisoryVerdict(
             verdict=Verdict.INCONCLUSIVE,
             rationale="review did not produce a final advisory verdict",
         ),
         quality_metrics=quality_metrics or ReviewResult().quality_metrics,
-        reviewer=ReviewerMeta(
-            model=reviewer_model,
-            raw_analysis=raw_analysis,
-            prompt_source=prompt_source,
-            prompt_version=prompt_version,
-            latency_sec=latency_sec,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            failure_reason=failure_reason,
-        ),
-        budget=ResultBudget(
-            status=budget_status,
-            files_reviewed=files_reviewed,
-            files_total=files_total,
-            chars_consumed=chars_consumed,
-            chars_limit=chars_limit,
-        ),
+        reviewer=reviewer,
+        budget=budget,
     )
 
 
@@ -107,18 +85,23 @@ def run_verify_pack(
     """
     budget_result = apply_budget_gate(pack)
     pack_completeness = compute_pack_completeness(pack)
+    result_budget = ResultBudget(
+        status=budget_result.status,
+        files_reviewed=budget_result.files_reviewed,
+        files_total=budget_result.files_total,
+        chars_consumed=budget_result.chars_consumed,
+        chars_limit=budget_result.chars_limit,
+    )
 
     if budget_result.status == BudgetStatus.REJECTED:
         return _build_result(
             pack=pack,
-            reviewer_model=reviewer_config.model,
-            budget_status=budget_result.status,
-            files_reviewed=budget_result.files_reviewed,
-            files_total=budget_result.files_total,
-            chars_consumed=budget_result.chars_consumed,
-            chars_limit=budget_result.chars_limit,
+            reviewer=ReviewerMeta(
+                model=reviewer_config.model,
+                failure_reason=budget_result.failure_reason,
+            ),
+            budget=result_budget,
             review_status=ReviewStatus.REJECTED,
-            failure_reason=budget_result.failure_reason,
             advisory_verdict=AdvisoryVerdict(
                 verdict=Verdict.INCONCLUSIVE,
                 rationale="review input was rejected by the budget gate",
@@ -134,14 +117,12 @@ def run_verify_pack(
     except ReviewerError as exc:
         return _build_result(
             pack=pack,
-            reviewer_model=reviewer_config.model,
-            budget_status=budget_result.status,
-            files_reviewed=budget_result.files_reviewed,
-            files_total=budget_result.files_total,
-            chars_consumed=budget_result.chars_consumed,
-            chars_limit=budget_result.chars_limit,
+            reviewer=ReviewerMeta(
+                model=reviewer_config.model,
+                failure_reason=exc.failure_reason,
+            ),
+            budget=result_budget,
             review_status=ReviewStatus.FAILED,
-            failure_reason=exc.failure_reason,
             advisory_verdict=AdvisoryVerdict(
                 verdict=Verdict.INCONCLUSIVE,
                 rationale=str(exc),
@@ -167,21 +148,19 @@ def run_verify_pack(
     )
     return _build_result(
         pack=pack,
-        reviewer_model=review.model,
-        budget_status=budget_result.status,
-        files_reviewed=budget_result.files_reviewed,
-        files_total=budget_result.files_total,
-        chars_consumed=budget_result.chars_consumed,
-        chars_limit=budget_result.chars_limit,
+        reviewer=ReviewerMeta(
+            model=review.model,
+            raw_analysis=review.raw_analysis,
+            prompt_source=getattr(review, "prompt_source", None),
+            prompt_version=getattr(review, "prompt_version", None),
+            latency_sec=review.latency_sec,
+            input_tokens=review.input_tokens,
+            output_tokens=review.output_tokens,
+        ),
+        budget=result_budget,
         review_status=review_status,
         findings=normalization.findings,
         raw_findings=normalization.raw_findings,
-        raw_analysis=review.raw_analysis,
-        prompt_source=getattr(review, "prompt_source", None),
-        prompt_version=getattr(review, "prompt_version", None),
-        latency_sec=review.latency_sec,
-        input_tokens=review.input_tokens,
-        output_tokens=review.output_tokens,
         advisory_verdict=advisory_verdict,
         quality_metrics=normalization.quality_metrics,
     )
