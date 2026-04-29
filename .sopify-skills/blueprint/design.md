@@ -18,6 +18,14 @@ ReviewPack → fresh_llm_reviewer → FindingNormalizer → Adjudicator → Revi
 6. **Core 不选择模型** — core 接收 resolved ReviewerConfig，不内置默认供应商或模型。
 7. **Default review path is host-integrated same-model fresh session** — 当宿主提供 fresh-session reviewer backend 时，优先复用宿主当前模型做隔离审查；standalone provider backend 仅为 fallback / portable mode。
 
+### Verify-C 定位与 verdict 边界
+
+CrossReview 在 produce → verify → knowledge 闭环中定位为 **Verify-C: post-produce quality review**，在隔离上下文中审查已生成的产物质量。区别于 Verify-A（pre-write authorization gate，归 Sopify Validator）和 Verify-B（post-write execution gate，归项目工具链）。
+
+**verdict 生成原则**：模型生成 findings（自由推理，不锁定推理路径）；deterministic policy（Adjudicator）生成 review verdict。模型可提供 suggested verdict，但不直接产生 blocking verdict。在 Sopify Phase 4a advisory 场景中，CrossReview verdict 仍是 advisory signal；Phase 4b bridge 才由 Sopify 映射成 checkpoint blocker。CrossReview 不理解 Sopify 内部 action/state/checkpoint 语义。
+
+**Knowledge accumulation 原则**：raw dogfood（review findings / verdict / eval 结果）不直接变 prompt 规则或 fixture。分层：raw record → candidate insight → accepted fixture/rule。P0 期间 dogfood 仅记录 raw（review findings / verdict / eval 结果）；candidate → accepted 先由人工确认，不设计自动 promotion gate。对 review 能力的优先反哺方式不是追加 prompt 约束，而是增强 eval fixtures、精简 review prompt、淘汰低信号规则。
+
 ## 数据隔离
 
 **Fixture 数据存放在 `eval-data` 分支**，不在 `main` 分支。
