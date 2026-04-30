@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0a2 — 2026-04-30
+
+### CLI
+
+- Add `crossreview pack --staged` and `crossreview pack --unstaged` for pre-commit working-tree reviews.
+- Add `crossreview verify --staged` and `crossreview verify --unstaged` for one-stop standalone reviews of staged or unstaged diffs.
+
+### Schema
+
+- Add `diff_source` provenance metadata to ReviewPack.
+- Split git provenance into `GitDiffSource` and reserve `ArtifactDiffSource` for future structured artifacts.
+- Reject unknown `diff_source.type` values during pack deserialization.
+
 ## 0.1.0a1 — 2026-04-27
 
 First public alpha release. Core thesis validated: context-isolated review via

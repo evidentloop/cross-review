@@ -53,7 +53,7 @@ Full evaluation across 33 fixtures (claude-opus-4.6, external_only scope):
 ## Quick Start
 
 ```bash
-pip install crossreview              # from PyPI (v0.1.0a1+)
+pip install crossreview              # from PyPI (v0.1.0a2+)
 pip install -e .                     # local dev (pack + verify commands)
 pip install -e '.[anthropic]'        # + Anthropic standalone reviewer backend
 pip install -e '.[dev]'              # dev dependencies (pytest + ruff)
@@ -66,6 +66,7 @@ pip install -e '.[dev]'              # dev dependencies (pytest + ruff)
 #   export ANTHROPIC_API_KEY=...
 
 crossreview pack --diff HEAD~1 --intent "fix auth token refresh" > pack.json
+crossreview pack --staged --intent "fix auth token refresh" > pack.json
 crossreview verify --pack pack.json
 ```
 
@@ -73,9 +74,10 @@ Or in one step:
 
 ```bash
 crossreview verify --diff HEAD~1 --intent "fix auth token refresh"
+crossreview verify --staged --intent "fix auth token refresh"
 ```
 
-`crossreview verify --diff` outputs human-readable text by default. `crossreview verify --pack` outputs `ReviewResult` JSON (default), or human-readable text with `--format human`:
+`crossreview verify --diff`, `--staged`, and `--unstaged` output human-readable text by default. `crossreview verify --pack` outputs `ReviewResult` JSON (default), or human-readable text with `--format human`:
 
 ```jsonc
 {

@@ -43,7 +43,7 @@
 ```json
 {
   "schema_version": "1",
-  "crossreview_version": "0.1.0a1",
+  "crossreview_version": "0.1.0a2",
   "run_id": "20260428T173000-a1b2c3d4",
   "timestamp": "2026-04-28T17:30:00+08:00",
   "repo": "cross-review",
